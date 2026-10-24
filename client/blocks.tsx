@@ -47,9 +47,11 @@ export function AskPanel({ plan, agentId, variant = "panel" }: { plan: Extract<B
         <Txt role="label" c="hot">Question</Txt>
       </View>
       <Txt role="ledeStrong">{plan.question}</Txt>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        {plan.options.map((o) => <Button key={o.value} label={o.label} disabled={busy} onPress={() => void pick(o.value)} />)}
-      </View>
+      {plan.pending !== null ? <Chip tone="run" glyph="…" text={`Sent to the first mate: ${plan.pending}`} /> : (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          {plan.options.map((o) => <Button key={o.value} label={o.label} disabled={busy} onPress={() => void pick(o.value)} />)}
+        </View>
+      )}
       {err ? <Txt role="meta" c="err">{err}</Txt> : null}
     </View>
   );

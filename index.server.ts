@@ -7,10 +7,12 @@ import { DEFAULT_POLICY, ENV_KEY, canvasSettings, parseOverride, type CanvasPoli
 import { Hub } from "./server/hub.ts";
 import { agentDeepLink } from "./shared/links.ts";
 import { startHttp } from "./server/http.ts";
+import { bindHosts, relayKey } from "./server/bind.ts";
+import { randomBytes } from "node:crypto";
 import { recipe } from "./server/recipe.ts";
 
 const PORT = Number(process.env.AGENT_CANVAS_PORT ?? 6790);
-const BIND = process.env.AGENT_CANVAS_BIND ?? "0.0.0.0";
+const BIND = bindHosts(process.env.AGENT_CANVAS_BIND);
 const PUBLIC = (process.env.AGENT_CANVAS_PUBLIC_URL ?? `http://manjaro.tail2e75.ts.net:${PORT}`).replace(/\/$/, "");
 const APP = (process.env.AGENT_CANVAS_APP_URL ?? "http://manjaro.tail2e75.ts.net:6781").replace(/\/$/, "");
 const LOCAL = `http://127.0.0.1:${PORT}`;
@@ -55,7 +57,8 @@ export default function contribute(server: PluginServerContext) {
   const unsubSettings = settings.subscribe(applySettings);
   log(`starting (pid ${process.pid}, daemon home ${home})`);
   let http: Awaited<ReturnType<typeof startHttp>> | null = null;
-  startHttp(hub, PORT, BIND, log).then((s) => (http = s)).catch((e) => log(`http failed: ${e?.message ?? e}`));
+  const key = relayKey(join(home, "agent-canvas", "relay.key"));
+  startHttp(hub, PORT, BIND, log, Date.now, { key, pageToken: randomBytes(16).toString("hex") }).then((s) => (http = s)).catch((e) => log(`http failed: ${e?.message ?? e}`));
 
   // The canvas tools are injected at creation for agents with AGENT_CANVAS=on, or for every agent when the global switch is on
   // (AGENT_CANVAS=off keeps them out). The hook cannot see labels, so a label override is handled after creation.

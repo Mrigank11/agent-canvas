@@ -11,11 +11,13 @@ import type { Inline, MdBlock } from "../shared/markdown.ts";
 export { esc };
 
 /** What the HTML needs from the server beyond the tree: the safe markup of a drawing, by hash. */
-export type RenderCtx = { svg?: (hash: string) => string | null };
+export type RenderCtx = { svg?: (hash: string) => string | null;
+  /** The card for another page (embed mode): no buttons, no script, sections closed, images at absolute URLs under `assetBase`. */
+  embed?: boolean; assetBase?: string };
 
 const unavailable = (what: string, alt: string) => `<div class="figmiss">${esc(alt ? `${what}: ${alt}` : `${what} unavailable`)}</div>`;
-const figure = (hash: string | null, alt: string, w: number, h: number) =>
-  hash ? `<figure class="fig"><img src="/asset/${esc(hash)}" alt="${esc(alt)}"${w && h ? ` width="${w}" height="${h}"` : ""} loading="lazy"></figure>` : unavailable("Image", alt);
+const figure = (hash: string | null, alt: string, w: number, h: number, base = "") =>
+  hash ? `<figure class="fig"><img src="${esc(base)}/asset/${esc(hash)}" alt="${esc(alt)}"${w && h ? ` width="${w}" height="${h}"` : ""} loading="lazy"></figure>` : unavailable("Image", alt);
 
 
 const mdInline = (c: Inline[]): string =>
@@ -63,6 +65,8 @@ export function renderPlan(p: BlockPlan, agentId: string, ctx: RenderCtx = {}): 
     case "decision": return `<div class="sec">${slabel(p.label)}${p.chosen ? chip("ok", p.chosen, "✓ ") : ""}${p.reason ? `<div class="c-idle">${esc(p.reason)}</div>` : ""}</div>`;
     case "ask":
       if (p.answered !== null) return `<div class="sec">${slabel("Answered")}<div class="c-idle">${esc(p.question)}</div>${chip("ok", p.answered, "✓ ")}</div>`;
+      if (p.pending !== null) return `<div class="ask"><div class="slabel">${sd("hot", { halo: false, pulse: false, size: 6 })}<span>Question</span></div><div class="q">${esc(p.question)}</div>${chip("run", `Sent to the first mate: ${p.pending}`, "… ")}</div>`;
+      if (ctx.embed) return `<div class="ask"><div class="slabel">${sd("hot", { halo: false, pulse: false, size: 6 })}<span>Question</span></div><div class="q">${esc(p.question)}</div>${meta("Answer on the card")}</div>`;
       return `<div class="ask"><div class="slabel">${sd("hot", { halo: false, pulse: false, size: 6 })}<span>Question</span></div><div class="q">${esc(p.question)}</div><div class="btns">${p.options.map((o) => button("secondary", o.label, `data-agent="${esc(agentId)}" data-ask="${esc(p.id)}" data-value="${esc(o.value)}"`)).join("")}</div></div>`;
     case "diff":
       return `<div class="sec">${p.file ? `<div class="pathrow"><span class="path">${esc(p.file)}</span><span class="dstat"><span class="a">+${p.add}</span> <span class="d">−${p.del}</span></span></div>` : ""}<div class="well">${p.lines.map((l) => `<span class="${l.kind === "ctx" ? "" : l.kind}">${esc(l.text || " ")}</span>`).join("")}</div></div>`;
@@ -71,9 +75,9 @@ export function renderPlan(p: BlockPlan, agentId: string, ctx: RenderCtx = {}): 
       const svg = p.hash ? ctx.svg?.(p.hash) : null;
       return svg ? `<div class="svgwrap" style="--w:${Math.round(p.w)}px" role="img" aria-label="${esc(p.alt)}">${svg}</div>` : unavailable("Drawing", p.alt);
     }
-    case "image": return figure(p.hash, p.alt, p.w, p.h);
+    case "image": return figure(p.hash, p.alt, p.w, p.h, ctx.assetBase);
     case "grid": return `<div class="grid" style="--cols:${gridColumns(p.cols, PAGE_CONTENT_WIDTH, p.wide)}">${p.children.map((c) => `<div class="cell">${renderPlan(c, agentId, ctx)}</div>`).join("")}</div>`;
-    case "collapse": return `<details class="collapse"${p.open ? " open" : ""}><summary>${esc(p.title)}</summary><div class="cbody">${p.children.map((c) => renderPlan(c, agentId, ctx)).join("")}</div></details>`;
+    case "collapse": return `<details class="collapse"${p.open && !ctx.embed ? " open" : ""}><summary>${esc(p.title)}</summary><div class="cbody">${p.children.map((c) => renderPlan(c, agentId, ctx)).join("")}</div></details>`;
   }
 }
 
@@ -86,7 +90,8 @@ export function renderCanvas(v: CanvasView, now: number, ctx: RenderCtx = {}): s
   const sp = statusPlan(v, now);
   const me = selfStatus(v, sp.label);
   const blocks = renderBlocks(v.tree, v.agentId, ctx);
-  return `<article class="canvas${sp.dim ? " dim" : ""}"><div class="sheet">${statusLine(sp)}<div class="trow dimmable"><span class="title">${esc(v.title)}</span>${meta(`· ${me.text}`, me.contradicted ? "c-warn" : "")}${v.agentUrl ? `<span style="margin-left:auto"><a href="${esc(v.agentUrl)}" target="_blank" rel="noopener noreferrer">Open agent in Paseo ↗</a></span>` : ""}</div><div class="sheet dimmable">${blocks || '<span class="c-idle">Nothing yet.</span>'}</div></div></article>`;
+  const card = `<article class="canvas${sp.dim ? " dim" : ""}"><div class="sheet">${statusLine(sp)}<div class="trow dimmable"><span class="title">${esc(v.title)}</span>${meta(`· ${me.text}`, me.contradicted ? "c-warn" : "")}${v.agentUrl ? `<span style="margin-left:auto"><a href="${esc(v.agentUrl)}" target="_blank" rel="noopener noreferrer">Open agent in Paseo ↗</a></span>` : ""}</div><div class="sheet dimmable">${blocks || '<span class="c-idle">Nothing yet.</span>'}</div></div></article>`;
+  return ctx.embed ? `<div class="acv">${card}</div>` : card;
 }
 
 /** The Canvases list: one row per agent; the row that needs you is the only filled one. */
@@ -107,10 +112,10 @@ const root=document.getElementById('root');const url=root.dataset.frag;
 async function tick(){try{const r=await fetch(url,{cache:'no-store'});if(r.ok){const h=await r.text();if(h!==root.dataset.last){const o=[...root.querySelectorAll('details[open]')].map(d=>d.dataset.k);root.innerHTML=h;root.dataset.last=h;o.forEach(k=>{const d=root.querySelector('details[data-k="'+k+'"]');if(d)d.setAttribute('open','')})}}}catch(e){}}
 setInterval(tick,1500);tick();
 document.addEventListener('click',async e=>{const b=e.target.closest('button[data-ask]');if(!b)return;b.disabled=true;
-const r=await fetch('/api/answer',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({agentId:b.dataset.agent,askId:b.dataset.ask,value:b.dataset.value})});
+const r=await fetch('/api/answer',{method:'POST',headers:{'content-type':'application/json','x-canvas-token':document.querySelector('meta[name=canvas-token]')?.content||''},body:JSON.stringify({agentId:b.dataset.agent,askId:b.dataset.ask,value:b.dataset.value})});
 const j=await r.json().catch(()=>({}));if(!j.ok){alert(j.error||'failed');b.disabled=false}tick();});
 `;
 
-export function page(title: string, body: string, frag: string, crumbs = ""): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>${esc(title)}</title><style>${cssVars()}${COMPONENT_CSS}</style></head><body><nav><a href="/">Canvases</a>${crumbs}<span class="demo">agent-canvas demo</span></nav><main><div id="root" data-frag="${esc(frag)}" data-last="">${body}</div></main><script>${SCRIPT}</script></body></html>`;
+export function page(title: string, body: string, frag: string, crumbs = "", token = ""): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="canvas-token" content="${esc(token)}"><title>${esc(title)}</title><style>${cssVars()}${COMPONENT_CSS}</style></head><body><nav><a href="/">Canvases</a>${crumbs}<span class="demo">agent-canvas demo</span></nav><main><div id="root" data-frag="${esc(frag)}" data-last="">${body}</div></main><script>${SCRIPT}</script></body></html>`;
 }

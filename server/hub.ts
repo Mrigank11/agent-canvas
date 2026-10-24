@@ -1,6 +1,6 @@
 // The hub owns every agent's canvas and keeps three things in step: what the agent wrote, what Paseo says is
 // true about the agent (run state, tool calls, current tool), and the plugin row drawn in the agent's pane.
-import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, renameSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { autoCanvas, type AutoItem } from "../shared/auto.ts";
@@ -8,8 +8,9 @@ import { BG_MONITOR_STARTED, BG_SHELL_STARTED, classifyActivity, oneLine, parseE
 import { findNode, parseCanvas, patchCanvas, serialize, walk, type Node, type PatchOp } from "../shared/canvas.ts";
 import { REANCHOR_AFTER, ROW_ID, ROW_KIND, ROW_VERSION, type BgJob, type CanvasView } from "../shared/contract.ts";
 import type { RunState } from "../shared/honesty.ts";
+import { statusPlan } from "../shared/plan.ts";
 import { Assets } from "./render/assets.ts";
-import { LABEL_KEY, firstOverride, parseOverride, resolveCanvas, type CanvasPolicy, type Override, type Resolved } from "../shared/config.ts";
+import { LABEL_KEY, RELAY_LABEL, TASK_LABEL, firstOverride, parseOverride, resolveCanvas, type CanvasPolicy, type Override, type Resolved } from "../shared/config.ts";
 
 type PaseoApi = PluginHandlerContext["paseo"];
 type Handle = ReturnType<PaseoApi["agents"]["ref"]>;
@@ -26,6 +27,15 @@ export type HubOptions = { log: (m: string) => void; stateFile: string | null; p
   policy?: () => CanvasPolicy;
   /** The message that teaches an agent without the tools to use the HTTP endpoint. */
   recipe?: (agentId: string) => string; now?: () => number };
+
+/** What `GET /api/fm/summary` returns per agent. */
+export type FmSummary = {
+  agentId: string; rev: number; archived: boolean; title: string;
+  verdict: { label: string; flags: { signal: string; text: string }[]; needsYou: boolean };
+  bluf: string; steps: { done: number; total: number; current: string | null };
+  openAsks: { id: string; question: string; options: { value: string; label: string }[]; blocking: boolean; pending?: string }[];
+  updatedAt: number | null; runState: RunState; activity: CanvasView["activity"]; url: string; agentUrl: string | null; auto: boolean;
+};
 
 const isRunState = (s: string): s is RunState => ["initializing", "idle", "running", "error", "closed"].includes(s);
 
@@ -134,11 +144,16 @@ export class Hub {
   private cwds = new Map<string, string>();
 
   private o: HubOptions;
+  get publicBase() { return this.o.publicBase; }
   /** Per-agent overrides by where they came from. The latest explicit one wins: runtime (the pill), then env at creation, then label. */
   private ovRuntime = new Map<string, Override>();
   private ovEnv = new Map<string, Override>();
   private ovLabel = new Map<string, Override>();
   private recipeSent = new Set<string>();
+  /** Relay mode (label canvas.relay=<agentId>): a pick is sent to that agent instead of the crew. `task` is the fm.task label, for the message. */
+  private relay = new Map<string, { to: string; task?: string }>();
+  /** Bumped on every change to an agent's view, so a consumer can skip the ones it already has. */
+  private revs = new Map<string, number>();
   /** Agents whose first turn has started (the recipe must not overtake the initial prompt), and those still waiting for one. */
   private started = new Set<string>();
   private recipeWanted = new Set<string>();
@@ -151,6 +166,7 @@ export class Hub {
     this.now = o.now ?? Date.now;
     this.assets = new Assets(o.stateFile ? join(dirname(o.stateFile), "cache") : null, this.now);
     this.restore();
+    this.pruneArchive();
   }
 
   // ---------- plumbing ----------
@@ -179,7 +195,7 @@ export class Hub {
     try {
       mkdirSync(dirname(this.o.stateFile), { recursive: true });
       const tmp = `${this.o.stateFile}.tmp`;
-      writeFileSync(tmp, JSON.stringify({ authored: [...this.authored], tokens: [...this.tokens], ovRuntime: [...this.ovRuntime], ovEnv: [...this.ovEnv], ovLabel: [...this.ovLabel], recipeSent: [...this.recipeSent] }));
+      writeFileSync(tmp, JSON.stringify({ authored: [...this.authored], tokens: [...this.tokens], ovRuntime: [...this.ovRuntime], ovEnv: [...this.ovEnv], ovLabel: [...this.ovLabel], recipeSent: [...this.recipeSent], relay: [...this.relay] }));
       renameSync(tmp, this.o.stateFile);
     } catch (e) { this.o.log(`persist failed: ${(e as Error).message}`); }
   }
@@ -194,6 +210,7 @@ export class Hub {
       this.ovEnv = new Map(s.ovEnv ?? []);
       this.ovLabel = new Map(s.ovLabel ?? []);
       this.recipeSent = new Set(s.recipeSent ?? []);
+      this.relay = new Map(s.relay ?? []);
     } catch {}
   }
 
@@ -221,8 +238,24 @@ export class Hub {
     const hit = [...this.pending].reverse().find((p) => p.cwd === cwd && this.now() - p.at < 120_000);
     if (hit) this.bind(hit.token, agentId);
   }
-  resolve(key: string): string | null {
-    return this.tokens.has(key) ? this.tokens.get(key) ?? null : key;
+  /** The agent a write key stands for: a creation token's agent, or an agent id that Paseo knows (null for anything else). */
+  async resolve(key: string): Promise<string | null> {
+    if (this.tokens.has(key)) return this.tokens.get(key) ?? null;
+    return (await this.exists(key)) ? key : null;
+  }
+  /** Is this a real, live agent? Known ones are trusted; others are asked of Paseo (and then become known). */
+  async exists(agentId: string): Promise<boolean> {
+    if (this.archived.has(agentId)) return false;
+    if (this.live.has(agentId) || this.authored.has(agentId)) return true;
+    if (!this.api) return false;
+    try {
+      const h = this.api.agents.ref(agentId);
+      const a = h.current?.() ?? (await h.refresh?.())?.agent ?? null;
+      if (!a || a.archivedAt) return false;
+      this.noteAgent(agentId, a.title, a.workspaceId, a.cwd);
+      void this.learnLabels(agentId);
+      return true;
+    } catch { return false; }
   }
   tokenFor(agentId: string): string | null {
     for (const [t, a] of this.tokens) if (a === agentId) return t;
@@ -271,8 +304,22 @@ export class Hub {
       const a = h.current() ?? (await h.refresh())?.agent ?? null;
       const o = parseOverride(a?.labels?.[LABEL_KEY]);
       if (o !== (this.ovLabel.get(agentId) ?? null)) this.setOverride(agentId, o, "label");
+      this.learnRelay(agentId, a?.labels);
     } catch { /* an agent whose record cannot be read (a provider that is too old) is simply left alone */ }
   }
+
+  private learnRelay(agentId: string, labels: Record<string, string> | undefined | null) {
+    const to = labels?.[RELAY_LABEL]?.trim();
+    const was = this.relay.get(agentId);
+    if (!to) { if (was) { this.relay.delete(agentId); this.persist(); } return; }
+    const task = labels?.[TASK_LABEL]?.trim() || undefined;
+    if (was?.to === to && was.task === task) return;
+    this.relay.set(agentId, { to, task });
+    this.persist();
+    this.changed(agentId);
+  }
+  /** Who a pick on this agent's canvas goes to instead of the agent (null: the agent itself). */
+  relayOf(agentId: string): string | null { return this.relay.get(agentId)?.to ?? null; }
 
   stateOf(agentId: string): { override: Override | null; tools: boolean; show: boolean } {
     const r = this.resolved(agentId);
@@ -335,21 +382,76 @@ export class Hub {
     return a ? serialize(a.source) : null;
   }
 
-  /** Record the human's answer on the Ask (without counting it as the agent's update) and deliver it to the agent. */
-  async answer(agentId: string, askId: string, value: string): Promise<{ ok: boolean; error?: string }> {
+  /** The open Ask `askId` with its option for `value`, or the reason there is none. */
+  private openAsk(agentId: string, askId: string, value: string | null): { cur: Authored; ask: Node; option?: Node } | { error: string } {
     const cur = this.authored.get(agentId);
     const ask = cur && findNode(cur.source, askId);
-    if (!cur || !ask || ask.tag !== "Ask") return { ok: false, error: "no such question on this canvas" };
-    const option = ask.children.find((o) => o.attrs.value === value);
-    if (!option) return { ok: false, error: `"${value}" is not one of the options` };
-    if (ask.attrs.answer) return { ok: false, error: "already answered" };
+    if (!cur || !ask || ask.tag !== "Ask") return { error: "no such question on this canvas" };
+    if (ask.attrs.answer) return { error: "already answered" };
+    const option = value === null ? undefined : ask.children.find((o) => o.attrs.value === value);
+    if (value !== null && !option) return { error: `"${value}" is not one of the options` };
+    return { cur, ask, option };
+  }
+
+  /**
+   * Record the human's pick on the Ask (without counting it as the agent's update). Normally it is delivered to the agent.
+   * With a relay (label canvas.relay) it is only recorded as pending and sent to the relay agent, which delivers it later;
+   * if the relay agent is gone, the pick goes straight to the agent after all.
+   */
+  async answer(agentId: string, askId: string, value: string): Promise<{ ok: boolean; error?: string; pending?: boolean }> {
+    const r = this.openAsk(agentId, askId, value);
+    if ("error" in r) return { ok: false, error: r.error };
+    const { ask, option } = r;
+    const relay = this.relay.get(agentId);
+    if (relay && (await this.exists(relay.to))) {
+      if (ask.attrs.pending) return { ok: false, error: `already pending: "${ask.attrs.pending}" was sent to the first mate` };
+      ask.attrs.pending = value;
+      this.changed(agentId);
+      this.persist();
+      try {
+        const q = oneLine(String(ask.attrs.question), 200);
+        await this.send(relay.to, `## Canvas answer · ${relay.task ?? agentId} · ask ${askId}: ${value} (${option!.text || value})\nagent ${agentId} · question "${q}"`);
+      } catch (e) {
+        delete ask.attrs.pending;
+        this.changed(agentId);
+        return { ok: false, error: `could not reach the relay agent: ${(e as Error).message}` };
+      }
+      return { ok: true, pending: true };
+    }
     ask.attrs.answer = value;
+    delete ask.attrs.pending;
     this.changed(agentId);
     this.persist();
     try {
-      await this.send(agentId, `Canvas answer to "${ask.attrs.question}": ${value} (${option.text || value}).`);
+      await this.send(agentId, `Canvas answer to "${ask.attrs.question}": ${value} (${option!.text || value}).`);
     } catch (e) {
       delete ask.attrs.answer;
+      this.changed(agentId);
+      return { ok: false, error: `could not reach the agent: ${(e as Error).message}` };
+    }
+    return { ok: true };
+  }
+
+  /**
+   * The relay agent's side: put a pick on the Ask for good and tell the agent. With `decline` the Ask is closed with the
+   * note instead and the agent is told why. A pending pick is cleared either way; `value` need not match it (the relay
+   * agent may deliver a different one).
+   */
+  async deliver(agentId: string, askId: string, d: { value: string } | { decline: string }): Promise<{ ok: boolean; error?: string }> {
+    const r = this.openAsk(agentId, askId, "value" in d ? d.value : null);
+    if ("error" in r) return { ok: false, error: r.error };
+    const { ask, option } = r;
+    const was = ask.attrs.pending;
+    delete ask.attrs.pending;
+    if ("value" in d) ask.attrs.answer = d.value; else { ask.attrs.answer = "declined"; ask.attrs.note = d.decline.slice(0, 300); }
+    this.changed(agentId);
+    this.persist();
+    const text = "value" in d
+      ? `Canvas answer to "${ask.attrs.question}": ${d.value} (${option!.text || d.value}).`
+      : `Canvas question "${ask.attrs.question}" was closed without an answer: ${d.decline}`;
+    try { await this.send(agentId, text); } catch (e) {
+      delete ask.attrs.answer; delete ask.attrs.note;
+      if (was) ask.attrs.pending = was;
       this.changed(agentId);
       return { ok: false, error: `could not reach the agent: ${(e as Error).message}` };
     }
@@ -375,7 +477,7 @@ export class Hub {
     try {
       const r = await this.api!.agents.list({ page: { limit: 100 } });
       const alive = new Set<string>();
-      for (const { agent } of r.entries) if (!agent.archivedAt) { alive.add(agent.id); const l0 = this.liveFor(agent.id); l0.title = agent.title; l0.workspaceId = agent.workspaceId ?? null; if (agent.cwd) this.cwds.set(agent.id, agent.cwd); const lo = parseOverride(agent.labels?.[LABEL_KEY]); if (lo) this.ovLabel.set(agent.id, lo); if (this.resolved(agent.id).show) await this.refresh(agent.id); }
+      for (const { agent } of r.entries) if (!agent.archivedAt) { alive.add(agent.id); const l0 = this.liveFor(agent.id); l0.title = agent.title; l0.workspaceId = agent.workspaceId ?? null; if (agent.cwd) this.cwds.set(agent.id, agent.cwd); const lo = parseOverride(agent.labels?.[LABEL_KEY]); if (lo) this.ovLabel.set(agent.id, lo); this.learnRelay(agent.id, agent.labels); if (this.resolved(agent.id).show) await this.refresh(agent.id); }
       // a canvas restored from disk for an agent that is archived or gone does not belong on the board
       for (const id of this.restored) if (!alive.has(id)) this.authored.delete(id);
       this.restored.clear();
@@ -390,8 +492,9 @@ export class Hub {
     if (workspaceId) l.workspaceId = workspaceId;
     if (this.resolved(agentId).show) void this.refresh(agentId);
   }
-  /** Archived agents leave the board. */
+  /** Archived agents leave the board; their last canvas is kept for 30 days where a consumer can still read it. */
   forget(agentId: string) {
+    this.snapshot(agentId);
     this.archived.add(agentId);
     this.live.delete(agentId);
     this.lastRow.delete(agentId);
@@ -520,6 +623,62 @@ export class Hub {
     }
   }
 
+  // ---------- the final canvas of an archived agent ----------
+
+  private archiveDir(): string | null { return this.o.stateFile ? join(dirname(this.o.stateFile), "archive") : null; }
+  private snapshot(agentId: string) {
+    const dir = this.archiveDir();
+    const v = dir && /^[\w-]+$/.test(agentId) ? this.view(agentId) : null;
+    if (!dir || !v) return;
+    try {
+      mkdirSync(dir, { recursive: true });
+      const tmp = join(dir, `${agentId}.json.tmp`);
+      writeFileSync(tmp, JSON.stringify({ archivedAt: this.now(), rev: this.revs.get(agentId) ?? 0, view: { ...v, runState: "closed", activity: null, currentTool: null } }));
+      renameSync(tmp, join(dir, `${agentId}.json`));
+    } catch (e) { this.o.log(`snapshot of ${agentId} failed: ${(e as Error).message}`); }
+    this.pruneArchive();
+  }
+  /** Snapshots older than 30 days are deleted. */
+  pruneArchive(maxAgeMs = 30 * 24 * 3600_000) {
+    const dir = this.archiveDir();
+    if (!dir) return;
+    try {
+      for (const f of readdirSync(dir)) {
+        const p = join(dir, f);
+        if (this.now() - statSync(p).mtimeMs > maxAgeMs) unlinkSync(p);
+      }
+    } catch { /* no archive yet */ }
+  }
+  /** The last canvas of an archived agent, or null. */
+  archivedView(agentId: string): { view: CanvasView; rev: number; archivedAt: number } | null {
+    const dir = this.archiveDir();
+    if (!dir || !/^[\w-]+$/.test(agentId)) return null;
+    try { const s = JSON.parse(readFileSync(join(dir, `${agentId}.json`), "utf8")); return { view: s.view, rev: s.rev ?? 0, archivedAt: s.archivedAt }; } catch { return null; }
+  }
+
+  // ---------- what a consumer (the first mate's deck) pulls ----------
+
+  /** One agent as a card header: verdict, BLUF, steps, open questions. A live agent, or else its archived snapshot. */
+  summary(agentId: string, now: number = this.now()): FmSummary | null {
+    const live = this.view(agentId);
+    const arch = live ? null : this.archivedView(agentId);
+    const v = live ?? arch?.view ?? null;
+    if (!v) return null;
+    const sp = statusPlan(v, now);
+    let bluf = "", done = 0, total = 0, current: string | null = null;
+    const openAsks: FmSummary["openAsks"] = [];
+    walk(v.tree, (n) => {
+      if (n.tag === "Bluf" && !bluf) bluf = n.text;
+      if (n.tag === "Step") { total++; if (n.attrs.state === "done") done++; if (n.attrs.state === "active" && current === null) current = n.text; }
+      if (n.tag === "Ask" && !n.attrs.answer) openAsks.push({ id: n.id, question: String(n.attrs.question), options: n.children.map((o) => ({ value: String(o.attrs.value), label: o.text || String(o.attrs.value) })), blocking: n.attrs.blocking === true, ...(n.attrs.pending ? { pending: String(n.attrs.pending) } : {}) });
+    });
+    return {
+      agentId, rev: live ? this.revs.get(agentId) ?? 0 : arch!.rev, archived: !live, title: v.title,
+      verdict: { label: sp.label, flags: sp.flags.map((f) => ({ signal: f.signal, text: f.text })), needsYou: sp.label === "Needs you" },
+      bluf, steps: { done, total, current }, openAsks, updatedAt: v.updatedAt, runState: v.runState, activity: v.activity, url: v.url, agentUrl: v.agentUrl, auto: v.auto,
+    };
+  }
+
   // ---------- the view ----------
 
   agents(): string[] {
@@ -559,6 +718,7 @@ export class Hub {
 
   /** Something changed: re-publish the row, debounced so a burst of patches is one write. */
   private changed(agentId: string) {
+    this.revs.set(agentId, (this.revs.get(agentId) ?? 0) + 1);
     if (this.timers.has(agentId)) return;
     this.timers.set(agentId, setTimeout(() => { this.timers.delete(agentId); void this.publish(agentId); }, 250));
   }

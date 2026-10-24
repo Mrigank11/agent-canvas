@@ -17,7 +17,7 @@ export type BlockPlan =
   | { kind: "progress"; id: string; label: string; pct: number; text: string; signal: "run" | "ok" }
   | { kind: "metrics"; id: string; items: MetricPlan[] }
   | { kind: "decision"; id: string; label: string; chosen: string | null; reason: string }
-  | { kind: "ask"; id: string; question: string; answered: string | null; options: { value: string; label: string }[] }
+  | { kind: "ask"; id: string; question: string; answered: string | null; /** a pick sent to a relay agent and not yet delivered, as the option label */ pending: string | null; options: { value: string; label: string }[] }
   | { kind: "diff"; id: string; file: string | null; add: number; del: number; lines: DiffLine[] }
   | { kind: "markdown"; id: string; blocks: MdBlock[] }
   /** Layout: `cols` is the wide-screen count (a compact surface draws one). `open` is forced when an unanswered Ask is inside. */
@@ -58,7 +58,7 @@ export function planBlock(n: Node): BlockPlan | null {
     case "Ask": {
       const options = n.children.map((o) => ({ value: String(o.attrs.value), label: o.text || String(o.attrs.value) }));
       const answer = n.attrs.answer ? String(n.attrs.answer) : null;
-      return { kind: "ask", id: n.id, question: String(n.attrs.question), answered: answer === null ? null : options.find((o) => o.value === answer)?.label ?? answer, options };
+      return { kind: "ask", id: n.id, question: String(n.attrs.question), answered: answer === null ? null : options.find((o) => o.value === answer)?.label ?? answer, pending: !answer && n.attrs.pending ? options.find((o) => o.value === n.attrs.pending)?.label ?? String(n.attrs.pending) : null, options };
     }
     case "Diff": {
       const lines = diffLines(n.text);

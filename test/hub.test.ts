@@ -33,10 +33,10 @@ const tool = async (h: Hub, key: string, name: string, args: unknown) => (await 
 test("a creation token binds to the agent id and the MCP tools then act on that agent", async () => {
   const h = hub();
   const token = h.mintToken("/work/x");
-  assert.equal(h.resolve(token), null);
+  assert.equal(await h.resolve(token), null);
   assert.match((await tool(h, token, "canvas_set", { source: CANVAS })).content[0].text, /not attached/);
   h.bind(token, "agent-1");
-  assert.equal(h.resolve(token), "agent-1");
+  assert.equal(await h.resolve(token), "agent-1");
   const r = (await tool(h, token, "canvas_set", { source: CANVAS }));
   assert.equal(r.isError, false);
   assert.match(r.content[0].text, /Element ids: .*s, a, q/);
@@ -48,19 +48,20 @@ test("the cwd fallback binds a fresh agent to the newest pending token", async (
   const h = hub();
   const t = h.mintToken("/work/y");
   h.bindByCwd("agent-2", "/other");
-  assert.equal(h.resolve(t), null);
+  assert.equal(await h.resolve(t), null);
   h.bindByCwd("agent-2", "/work/y");
-  assert.equal(h.resolve(t), "agent-2");
+  assert.equal(await h.resolve(t), "agent-2");
 });
 
 test("validation errors come back to the agent and change nothing", async () => {
   const h = hub();
-  h.bind(h.mintToken("/"), "a1");
-  const r = (await tool(h, [...(h as any).tokens.keys()][0], "canvas_set", { source: `<Canvas title="x"><script>1</script></Canvas>` }));
+  const token = h.mintToken("/");
+  h.bind(token, "a1");
+  const r = (await tool(h, token, "canvas_set", { source: `<Canvas title="x"><script>1</script></Canvas>` }));
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /not in the vocabulary/);
   assert.equal(h.source("a1"), null);
-  assert.match((await tool(h, "a1", "canvas_patch", { ops: [{ id: "x", set: {} }] })).content[0].text, /no canvas yet/);
+  assert.match((await tool(h, token, "canvas_patch", { ops: [{ id: "x", set: {} }] })).content[0].text, /no canvas yet/);
 });
 
 test("MCP protocol: initialize, tools/list, notifications and unknown methods", async () => {

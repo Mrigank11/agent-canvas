@@ -55,7 +55,7 @@ export async function handleRpc(hub: Hub, key: string, msg: Rpc) {
     case "ping": return reply({});
     case "tools/list": return reply({ tools: TOOLS });
     case "tools/call": {
-      const agentId = hub.resolve(key);
+      const agentId = await hub.resolve(key);
       if (!agentId) return reply(text("This canvas is not attached to an agent yet. Try again in a moment.", true));
       return reply(await callTool(hub, agentId, String(msg.params?.name), msg.params?.arguments));
     }

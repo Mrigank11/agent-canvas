@@ -61,6 +61,27 @@ A Claude Code agent that starts a background command or a Monitor and goes idle 
 
 What the plugin can see (Paseo 0.12, Claude Code only): the start from Claude's result text (`running in background with ID: …`, `Monitor started (task …`), pinned in `shared/ui-spec.ts` with fixture tests; the finish from Paseo's `task_notification` items (`metadata.toolUseId` joins it to the launch, `metadata.status` decides done, failed or killed, the exit code is parsed from the summary text); times are the hub's first-seen stamps, so a job already running when the plugin first reads an agent shows "≥ 3m". A finish whose start was not recognised still appears, as a finished job. Codex and OpenCode agents show nothing. No output tails: that needs the daemon's disk, outside the Paseo API. Rules: `shared/honesty.ts`; rows and chip: `backgroundPlan` in `shared/plan.ts`; tests: `test/background.test.ts`.
 
+## Relay, consumer API and write hardening
+
+**Relay mode.** An agent with the label `canvas.relay=<agentId>` (and optionally `fm.task=<name>`) does not receive a captain's pick directly. A pick on any surface (pane card, pill, panel, browser) is recorded on the Ask as `pending` ("Sent to the first mate: Postgres", no buttons) and sent to the relay agent as `## Canvas answer · <fm.task or agentId> · ask <id>: <value> (<label>)` plus an `agent … · question …` line. A second pick while one is pending is refused. If the relay agent no longer exists, the pick goes to the agent as before. The relay agent delivers with `POST /api/fm/deliver` (`{agentId, askId, value}` or `{agentId, askId, decline: "<why>"}`, header `x-canvas-key`): the Ask is answered, or closed with the reason, and the agent is told.
+
+**Consumer API** (this machine only: loopback or the host's own addresses; others get 403):
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/fm/summary?agents=a,b` (no `agents`: all) | `{agents: [{agentId, rev, archived, title, verdict: {label, flags[], needsYou}, bluf, steps: {done, total, current}, openAsks: [{id, question, options[], blocking, pending?}], updatedAt, runState, activity, url, agentUrl, auto}], missing: [ids]}`. `rev` is bumped on every change to the agent's canvas (the label of a time-based verdict such as Stale can change without it). An archived agent's snapshot answers with `archived: true`. |
+| `GET /api/fm/card/<agentId>[?archived=1]` | The canvas as an HTML fragment in embed mode inside `<div class="acv">`: no script, no buttons (open asks say "Answer on the card"), sections closed, images at absolute `AGENT_CANVAS_PUBLIC_URL` URLs. |
+| `GET /api/fm/css[?theme=light\|dark]` | The stylesheet scoped under `.acv`; with `theme` the dark rules follow it instead of the OS setting. |
+| `POST /api/fm/deliver` | See above. Loopback and `x-canvas-key` (401 missing, 403 wrong). |
+
+**Final canvas.** When an agent is archived its last view is written to `<daemon home>/agent-canvas/archive/<agentId>.json` (instead of being dropped) and pruned after 30 days. It is what `summary` and `card?archived=1` read once the agent is gone.
+
+**Write hardening.**
+- `POST /api/canvas/<key>` and `/mcp/<key>` resolve `<key>` to a creation token or to an agent id Paseo knows (not archived); anything else is 404. They are accepted from this machine only.
+- `POST /api/answer` needs the page token (`x-canvas-token`, a per-process secret the served pages carry, so a blind cross-site or script POST fails) or the relay key; 401 with neither, 403 with a wrong one. The read pages stay open on the tailnet.
+- The relay key is minted on first start at `<daemon home>/agent-canvas/relay.key` (0600).
+- Listening: `127.0.0.1` plus the tailnet address (100.64.0.0/10) by default, not `0.0.0.0`. `AGENT_CANVAS_BIND` takes a comma-separated list (`0.0.0.0` for every interface, as before).
+
 ## Who gets a canvas (configuration)
 
 Precedence: **per-agent override, then the global switch, then the default.** One resolver, `shared/config.ts` (`resolveCanvas`), unit-tested for every combination.

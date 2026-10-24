@@ -9,6 +9,10 @@ import { z } from "zod";
 
 export const ENV_KEY = "AGENT_CANVAS";
 export const LABEL_KEY = "canvas";
+/** Label `canvas.relay=<agentId>`: a pick on the agent's canvas goes to that agent (the first mate) to deliver, not to the agent. */
+export const RELAY_LABEL = "canvas.relay";
+/** Label `fm.task`: the task the agent works on, used to name it in a relayed pick. */
+export const TASK_LABEL = "fm.task";
 
 /** Host-wide defaults, editable under Settings > Plugins > Agent canvas. */
 export const canvasSettings = defineSettings({

@@ -61,7 +61,7 @@ export const VOCABULARY: Record<string, TagSpec> = {
   Progress: { attrs: { value: { type: "number", required: true }, max: { type: "number" }, label: { type: "string", max: 80 } }, children: [], text: false },
   Metric: { attrs: { label: { type: "string", required: true, max: 40 }, value: { type: "string", required: true, max: 40 }, tone: { type: "enum", values: TONES } }, children: [], text: false },
   Decision: { attrs: { title: { type: "string", required: true, max: 120 }, chosen: { type: "string", max: 120 } }, children: [], text: true },
-  Ask: { attrs: { question: { type: "string", required: true, max: 300 }, blocking: { type: "boolean" }, answer: { type: "string", max: 300 } }, children: ["Option"], text: false },
+  Ask: { attrs: { question: { type: "string", required: true, max: 300 }, blocking: { type: "boolean" }, answer: { type: "string", max: 300 }, pending: { type: "string", max: 300 }, note: { type: "string", max: 300 } }, children: ["Option"], text: false },
   Option: { attrs: { value: { type: "string", required: true, max: 80 } }, children: [], text: true, parents: ["Ask"] },
   Markdown: { attrs: {}, children: [], text: true, raw: true, maxText: 8_000 },
   Svg: { attrs: { alt: { type: "string", max: 200 } }, children: [], text: true, raw: true, maxText: SVG_LIMITS.chars },
