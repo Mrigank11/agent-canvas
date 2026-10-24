@@ -30,11 +30,12 @@ export const THRESHOLDS = { doneButRunningSeconds: 10, doneButRunningCalls: 2, s
 const DONE_WORD = /(^|[^a-z])(?<!not )(done|completed?|finished|shipped)([^a-z]|$)/i;
 
 export function summarize(root: Node) {
-  let steps = 0, open = 0, active = 0, openAsks = 0;
+  let steps = 0, open = 0, active = 0, openAsks = 0, done = 0;
   let bluf = "";
   walk(root, (n) => {
     if (n.tag === "Step") {
       steps++;
+      if (n.attrs.state === "done") done++;
       if (n.attrs.state === "pending" || n.attrs.state === "active") open++;
       if (n.attrs.state === "active") active++;
     }
@@ -45,7 +46,7 @@ export function summarize(root: Node) {
     root.attrs.status === "done" ||
     (steps > 0 && open === 0 && root.attrs.status !== "blocked" && root.attrs.status !== "working") ||
     DONE_WORD.test(bluf);
-  return { steps, openSteps: open, activeSteps: active, openAsks, claimsDone };
+  return { steps, doneSteps: done, openSteps: open, activeSteps: active, openAsks, claimsDone };
 }
 
 export function checkHonesty(root: Node, facts: Facts): Verdict {

@@ -13,6 +13,8 @@ const nodeSchema = z.custom<Node>((v) => typeof v === "object" && v !== null && 
 /** One agent's canvas as the renderers see it. The same value is the timeline row data and the RPC output. */
 export const canvasView = z.object({
   agentId: z.string(),
+  /** The workspace the agent lives in; the side panel shows the canvases of its own workspace. */
+  workspaceId: z.string().nullable(),
   title: z.string(),
   tree: nodeSchema,
   /** True when the agent never wrote a canvas and this one was derived from its timeline. */

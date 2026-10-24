@@ -69,12 +69,12 @@ export default function contribute(server: PluginServerContext) {
   server.on("agent.created", (e, ctx) => {
     hub.capture(ctx, "agent.created");
     hub.bindByCwd(e.agent.id, e.agent.cwd);
-    hub.noteAgent(e.agent.id, e.agent.title);
+    hub.noteAgent(e.agent.id, e.agent.title, e.agent.workspaceId);
   });
   for (const name of ["agent.turn_started", "agent.turn_ended", "agent.permission_requested", "agent.permission_resolved"] as const) {
     server.on(name, (e, ctx) => {
       hub.capture(ctx, name);
-      hub.noteAgent(e.agent.id, e.agent.title);
+      hub.noteAgent(e.agent.id, e.agent.title, e.agent.workspaceId);
     });
   }
   for (const name of ["agent.archived", "agent.closed"] as const) {

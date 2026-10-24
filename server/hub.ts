@@ -16,7 +16,7 @@ type Item = Page["entries"][number]["item"];
 /** What the agent wrote and when. */
 type Authored = { source: Node; updatedAt: number; callsAtUpdate: number };
 /** What Paseo says. */
-type Live = { title: string | null; runState: RunState; callIds: Set<string>; items: AutoItem[]; currentTool: string | null; lastActivityAt: number; seq: number };
+type Live = { title: string | null; workspaceId: string | null; runState: RunState; callIds: Set<string>; items: AutoItem[]; currentTool: string | null; lastActivityAt: number; seq: number };
 
 export type HubOptions = { log: (m: string) => void; stateFile: string | null; publicBase: string; localBase: string; agentLink?: (agentId: string) => string | null; now?: () => number };
 
@@ -208,7 +208,7 @@ export class Hub {
   private callCount(agentId: string) { return this.live.get(agentId)?.callIds.size ?? 0; }
   private liveFor(agentId: string): Live {
     let l = this.live.get(agentId);
-    if (!l) this.live.set(agentId, (l = { title: null, runState: "idle", callIds: new Set(), items: [], currentTool: null, lastActivityAt: this.now(), seq: 0 }));
+    if (!l) this.live.set(agentId, (l = { title: null, workspaceId: null, runState: "idle", callIds: new Set(), items: [], currentTool: null, lastActivityAt: this.now(), seq: 0 }));
     return l;
   }
 
@@ -217,17 +217,18 @@ export class Hub {
     try {
       const r = await this.api!.agents.list({ page: { limit: 100 } });
       const alive = new Set<string>();
-      for (const { agent } of r.entries) if (!agent.archivedAt) { alive.add(agent.id); this.liveFor(agent.id).title = agent.title; await this.refresh(agent.id); }
+      for (const { agent } of r.entries) if (!agent.archivedAt) { alive.add(agent.id); const l0 = this.liveFor(agent.id); l0.title = agent.title; l0.workspaceId = agent.workspaceId ?? null; await this.refresh(agent.id); }
       // a canvas restored from disk for an agent that is archived or gone does not belong on the board
       for (const id of this.restored) if (!alive.has(id)) this.authored.delete(id);
       this.restored.clear();
     } catch (e) { this.o.log(`discover failed: ${(e as Error).message}`); }
   }
 
-  noteAgent(agentId: string, title?: string | null) {
+  noteAgent(agentId: string, title?: string | null, workspaceId?: string | null) {
     if (this.archived.has(agentId)) return;
     const l = this.liveFor(agentId);
     if (title !== undefined) l.title = title;
+    if (workspaceId) l.workspaceId = workspaceId;
     void this.refresh(agentId);
   }
   /** Archived agents leave the board. */
@@ -284,6 +285,7 @@ export class Hub {
     const tree = a?.source ?? autoCanvas(l.title, l.items, l.runState === "running");
     return {
       agentId,
+      workspaceId: l.workspaceId,
       title: a?.source.attrs.title ? String(a.source.attrs.title) : l.title ?? agentId.slice(0, 8),
       tree,
       auto: !a,

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { checkHonesty } from "../shared/honesty";
 import { CanvasBody, useLiveAgent } from "./canvas";
+import { useFocusedAgent } from "./store";
 import { Button, CanvasProvider, useNow, useView, useViews, type Theme } from "./common";
 import type { CanvasView } from "../shared/contract";
 
@@ -69,13 +70,31 @@ export function ListItem({ openScreen, currentScreen }: PluginSidebarItemProps) 
   return <SidebarRow icon="LayoutDashboard" label="Canvases" active={currentScreen?.screenId === LIST_SCREEN} onPress={() => openScreen({ screenId: LIST_SCREEN })} />;
 }
 
-/** The per-agent panel the pill opens. */
-export function AgentPanelBody({ agentId, theme, layout }: { agentId: string; theme: Theme; layout: { compact: boolean } }) {
-  const { view, loading } = useView(agentId);
-  const live = useLiveAgent(agentId); // a panel is the one place the host lets us read Paseo's live agent state
+/** The Explorer side panel: the canvas of the agent on screen in this workspace (reported by that agent's pill). */
+export function SidePanelBody({ workspaceId, theme, layout, navigation }: { workspaceId: string; theme: Theme; layout: { compact: boolean }; navigation?: { openAgent: (i: { agentId: string }) => void } }) {
+  const { views, loading } = useViews();
+  const focused = useFocusedAgent(workspaceId);
+  const mine = views.filter((v) => v.workspaceId === workspaceId);
+  const [picked, setPicked] = useState<{ agentId: string; focusWas: string | null } | null>(null);
+  // a manual pick holds until the agent on screen changes again
+  const manual = picked && picked.focusWas === focused && mine.some((v) => v.agentId === picked.agentId) ? picked.agentId : null;
+  const rank = (v: CanvasView) => (v.runState === "running" ? 2 : 0) + (v.auto ? 0 : 1);
+  const fallback = [...mine].sort((a, b) => rank(b) - rank(a) || b.lastActivityAt - a.lastActivityAt)[0]?.agentId ?? null;
+  const shownId = manual ?? (focused && mine.some((v) => v.agentId === focused) ? focused : fallback);
+  const view = mine.find((v) => v.agentId === shownId) ?? null;
+  const live = useLiveAgent(shownId ?? "");
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: theme.colors.surface0 }} contentContainerStyle={{ padding: layout.compact ? 16 : 24, gap: 12 }}>
-      {view ? <CanvasBody view={view} theme={theme} withBrowserLink live={live} /> : <Text style={{ color: theme.colors.foregroundMuted }}>{loading ? "Loading…" : "No canvas for this agent yet."}</Text>}
+    <ScrollView style={{ flex: 1, backgroundColor: theme.colors.surface0 }} contentContainerStyle={{ padding: layout.compact ? 14 : 16, gap: 12 }}>
+      {mine.length > 1 ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          {mine.map((v) => (
+            <Pressable key={v.agentId} accessibilityRole="button" onPress={() => setPicked({ agentId: v.agentId, focusWas: focused })} style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 99, borderWidth: 1, borderColor: v.agentId === shownId ? theme.colors.accent : theme.colors.border, backgroundColor: v.agentId === shownId ? theme.colors.accent : "transparent" }}>
+              <Text style={{ fontSize: 12, color: v.agentId === shownId ? theme.colors.accentForeground : theme.colors.foregroundMuted }} numberOfLines={1}>{v.title}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+      {view ? <CanvasBody view={view} theme={theme} withBrowserLink live={shownId === view.agentId ? live : null} onOpenAgent={navigation ? () => navigation.openAgent({ agentId: view.agentId }) : undefined} /> : <Text style={{ color: theme.colors.foregroundMuted }}>{loading ? "Loading…" : "No agent in this workspace has a canvas yet."}</Text>}
     </ScrollView>
   );
 }
