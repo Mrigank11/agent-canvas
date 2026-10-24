@@ -21,7 +21,7 @@ export type BlockPlan =
   | { kind: "diff"; id: string; file: string | null; add: number; del: number; lines: DiffLine[] }
   | { kind: "markdown"; id: string; blocks: MdBlock[] }
   /** Layout: `cols` is the wide-screen count (a compact surface draws one). `open` is forced when an unanswered Ask is inside. */
-  | { kind: "grid"; id: string; cols: number; children: BlockPlan[] }
+  | { kind: "grid"; id: string; cols: number; /** natural width of the widest drawing directly in it, 0 if none: a grid gives such a drawing a wider cell by using fewer columns */ wide: number; children: BlockPlan[] }
   | { kind: "collapse"; id: string; title: string; open: boolean; children: BlockPlan[] }
   /** An agent drawing, a DOT diagram or a Vega-Lite chart: all three end as one rebuilt SVG artefact. `hash`: the server's artefact for it (null when the client was given the raw tree, or the artefact is gone: drawn as `alt`). */
   | { kind: "svg"; id: string; hash: string | null; alt: string; w: number; h: number }
@@ -73,7 +73,7 @@ export function planBlock(n: Node): BlockPlan | null {
     }
     case "Svg": case "Diagram": case "Chart": return { kind: "svg", id: n.id, alt: String(n.attrs.alt ?? ""), ...assetOf(n.attrs) };
     case "Image": return { kind: "image", id: n.id, alt: String(n.attrs.alt ?? ""), src: String(n.attrs.src), ...assetOf(n.attrs) };
-    case "Grid": return { kind: "grid", id: n.id, cols: Math.max(1, Math.min(3, Number(n.attrs.cols ?? 2) || 2)), children: planBlocks(n) };
+    case "Grid": { const children = planBlocks(n); return { kind: "grid", id: n.id, cols: Math.max(1, Math.min(3, Number(n.attrs.cols ?? 2) || 2)), wide: Math.max(0, ...children.map((c) => (c.kind === "svg" ? c.w : 0))), children }; }
     case "Collapse": return { kind: "collapse", id: n.id, title: String(n.attrs.title), open: n.attrs.open === true || hasOpenAsk(n), children: planBlocks(n) };
     default: return null;
   }

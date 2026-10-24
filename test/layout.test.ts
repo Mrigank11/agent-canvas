@@ -58,6 +58,6 @@ test("compact vs wide: one column below the breakpoint on both renderers", () =>
   assert.equal((html.match(/class="cell"/g) ?? []).length, 2);
   assert.ok(html.includes(`<summary>More &amp; more</summary>`) && !html.includes("<details class=\"collapse\" open"));
   const native = readFileSync(join(import.meta.dirname, "../client/blocks.tsx"), "utf8");
-  assert.match(native, /gridColumns\(plan\.cols, width\)/);
+  assert.match(native, /gridColumns\(plan\.cols, width, plan\.wide/);
   assert.match(native, /plan\.title/);
 });

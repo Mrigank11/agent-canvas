@@ -251,7 +251,7 @@ test("a patch is validated against the canvas it will join: ids stay stable thro
 
 // ---------- house style ----------
 
-import { DIAGRAM, DIAGRAM_FONT, CHART_PALETTE, DRAWING_MIN_SCALE, SIGNAL, drawingWidth, tokensFixed } from "../shared/ui-spec.ts";
+import { DIAGRAM, DIAGRAM_FONT, CHART_PALETTE, DRAWING_MIN_SCALE, PAGE_CONTENT_WIDTH, SIGNAL, drawingWidth, gridColumns, tokensFixed } from "../shared/ui-spec.ts";
 import { INK, LINE, MUTED, MUTED_TEXT, PAPER, WELL } from "../shared/dot.ts";
 import { VOCAB_DOC } from "../server/vocab-doc.ts";
 import { readFileSync } from "node:fs";
@@ -345,4 +345,15 @@ test("the vocab doc and the skill send explanatory figures to hand-written Svg, 
   assert.equal(svg.kind, "svg");
   const a = new Assets(null);
   return a.prepare(tree).then((p) => { assert.ok(p.ok, p.ok ? "" : p.errors.join()); });
+});
+
+test("a grid gives a wide drawing room: fewer columns until a cell shows it at 90% or better, on both surfaces", () => {
+  assert.equal(gridColumns(2, PAGE_CONTENT_WIDTH, 0), 2);
+  assert.equal(gridColumns(2, PAGE_CONTENT_WIDTH, 370), 2, "a 370 px drawing fits half the page");
+  assert.equal(gridColumns(2, PAGE_CONTENT_WIDTH, 560), 1, "a 560 px one gets the full row");
+  assert.equal(gridColumns(3, PAGE_CONTENT_WIDTH, 300), 2);
+  assert.equal(gridColumns(3, 1200, 300, 32), 3);
+  assert.equal(gridColumns(2, 400, 100), 1, "still one column on a compact surface");
+  const wide = planBlocks(parse('<Grid id="g" cols={2}><Diagram id="d" lang="dot" alt="x">digraph { a -> b }</Diagram><Markdown id="m">x</Markdown></Grid>'));
+  assert.ok(wide[0].kind === "grid" && wide[0].wide === 0, "no drawing has been rendered yet, so no width");
 });

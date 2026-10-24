@@ -92,7 +92,15 @@ export const SPACE = { panel: 16, block: 20, inner: 8, ask: 14 } as const;
 /** Below this width (px) a <Grid> is one column on every surface; the browser's media query and the native `gridColumns` both read it. */
 export const GRID_COMPACT_BELOW = 560;
 export const GRID_GAP = 12;
-export const gridColumns = (cols: number, width: number): number => (width < GRID_COMPACT_BELOW ? 1 : Math.max(1, Math.min(3, Math.floor(cols))));
+/** The browser page's content column (720 less its padding), which is all the server knows of the width it draws into. */
+export const PAGE_CONTENT_WIDTH = 688;
+/** `pad` is what the surface spends on its own margins. `widest` is the natural width of the widest drawing in the grid: columns drop until a cell can show it at DRAWING_MIN_SCALE or better, so a diagram is not clipped in a narrow cell. */
+export const gridColumns = (cols: number, width: number, widest = 0, pad = 0): number => {
+  if (width < GRID_COMPACT_BELOW) return 1;
+  let c = Math.max(1, Math.min(3, Math.floor(cols)));
+  while (c > 1 && (width - pad - GRID_GAP * (c - 1)) / c < widest * DRAWING_MIN_SCALE) c--;
+  return c;
+};
 export const RADIUS = { control: 8, chip: 6, region: 10, card: 12 } as const;
 
 // ---------- diagrams and charts ----------

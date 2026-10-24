@@ -246,7 +246,7 @@ function Diff({ plan }: { plan: Extract<BlockPlan, { kind: "diff" }> }) {
 /** A Grid: `cols` columns on a wide surface, one on a compact one (the rule is gridColumns in shared/ui-spec). */
 function GridView({ plan, agentId, askVariant, dense }: { plan: Extract<BlockPlan, { kind: "grid" }>; agentId: string; askVariant?: "panel" | "flat"; dense?: boolean }) {
   const { width } = useWindowDimensions();
-  const cols = gridColumns(plan.cols, width);
+  const cols = gridColumns(plan.cols, width, plan.wide, 2 * SPACE.panel);
   const rows: BlockPlan[][] = [];
   for (let i = 0; i < plan.children.length; i += cols) rows.push(plan.children.slice(i, i + cols));
   return (

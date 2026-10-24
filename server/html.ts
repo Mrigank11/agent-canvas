@@ -2,6 +2,7 @@
 // string primitives in ui-html.ts, so what a block means is decided once. Everything agent-supplied goes through
 // esc(); there is no innerHTML path for agent text and no script in the output.
 import { planBlocks, rowPlan, selfStatus, statusPlan, type BlockPlan } from "../shared/plan.ts";
+import { PAGE_CONTENT_WIDTH, gridColumns } from "../shared/ui-spec.ts";
 import type { CanvasView } from "../shared/contract.ts";
 import { COMPONENT_CSS, badge, bar, button, chip, cssVars, delta, esc, glyphCircle, jobChip, meta, sd, slabel, statusLine, stepRow, ticks } from "./ui-html.ts";
 import type { Node } from "../shared/canvas.ts";
@@ -71,7 +72,7 @@ export function renderPlan(p: BlockPlan, agentId: string, ctx: RenderCtx = {}): 
       return svg ? `<div class="svgwrap" style="--w:${Math.round(p.w)}px" role="img" aria-label="${esc(p.alt)}">${svg}</div>` : unavailable("Drawing", p.alt);
     }
     case "image": return figure(p.hash, p.alt, p.w, p.h);
-    case "grid": return `<div class="grid" style="--cols:${p.cols}">${p.children.map((c) => `<div class="cell">${renderPlan(c, agentId, ctx)}</div>`).join("")}</div>`;
+    case "grid": return `<div class="grid" style="--cols:${gridColumns(p.cols, PAGE_CONTENT_WIDTH, p.wide)}">${p.children.map((c) => `<div class="cell">${renderPlan(c, agentId, ctx)}</div>`).join("")}</div>`;
     case "collapse": return `<details class="collapse"${p.open ? " open" : ""}><summary>${esc(p.title)}</summary><div class="cbody">${p.children.map((c) => renderPlan(c, agentId, ctx)).join("")}</div></details>`;
   }
 }
