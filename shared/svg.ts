@@ -4,6 +4,9 @@
 // Pure and dependency-free, like the Markdown parser: the plugin server has no runtime node_modules.
 
 export const SVG_LIMITS = { chars: 48_000, elements: 2_000, depth: 40, attr: 20_000 };
+/** Output of our own renderers (Graphviz, Vega) is bigger than a drawing an agent would write by hand, and is rebuilt on the same whitelist. */
+export const RENDERED_LIMITS = { chars: 600_000, elements: 12_000, depth: 40, attr: 60_000 };
+type Limits = typeof SVG_LIMITS;
 const ELEMENTS = new Set(["svg", "g", "rect", "circle", "ellipse", "line", "polyline", "polygon", "path", "text", "tspan", "defs", "marker", "linearGradient", "radialGradient", "stop", "clipPath"]);
 const TEXTUAL = new Set(["text", "tspan"]);
 
@@ -45,7 +48,7 @@ function decode(s: string, line: number): string {
 }
 
 /** Strict XML subset: elements, attributes, text, comments, CDATA. DOCTYPE/ENTITY and every other construct are errors. */
-function parseXml(src: string): XNode {
+function parseXml(src: string, lim: Limits): XNode {
   const text = src.replace(/^﻿/, "");
   const lineAt = (p: number) => text.slice(0, p).split("\n").length;
   let i = 0, count = 0;
@@ -83,7 +86,7 @@ function parseXml(src: string): XNode {
     }
     const nm = NAME.exec(text.slice(i + 1, i + 200));
     if (!nm) throw new Error(`line ${line}: stray "<" (write &lt;)`);
-    if (++count > SVG_LIMITS.elements) throw new Error(`more than ${SVG_LIMITS.elements} elements`);
+    if (++count > lim.elements) throw new Error(`more than ${lim.elements} elements`);
     const node: XNode = { name: nm[0], attrs: new Map(), kids: [], line };
     let j = i + 1 + nm[0].length;
     let self = false;
@@ -111,7 +114,7 @@ function parseXml(src: string): XNode {
     if (parent) parent.kids.push(node);
     else if (root) throw new Error(`line ${line}: only one <svg> root is allowed`);
     else root = node;
-    if (!self) { stack.push(node); if (stack.length > SVG_LIMITS.depth) throw new Error(`nesting deeper than ${SVG_LIMITS.depth} levels`); }
+    if (!self) { stack.push(node); if (stack.length > lim.depth) throw new Error(`nesting deeper than ${lim.depth} levels`); }
     i = j;
   }
   if (stack.length) throw new Error(`<${stack[stack.length - 1].name}> is never closed`);
@@ -131,10 +134,10 @@ export function fnv(s: string): string {
 const ID = /^[A-Za-z_][\w.-]{0,63}$/;
 const URL_REF = /^url\(\s*(['"]?)#([A-Za-z_][\w.-]{0,63})\1\s*\)$/;
 
-export function sanitizeSvg(source: string): SvgResult {
-  if (source.length > SVG_LIMITS.chars) return { ok: false, error: `the SVG is over ${SVG_LIMITS.chars} characters` };
+export function sanitizeSvg(source: string, lim: Limits = SVG_LIMITS): SvgResult {
+  if (source.length > lim.chars) return { ok: false, error: `the SVG is over ${lim.chars} characters` };
   let root: XNode;
-  try { root = parseXml(source); } catch (e) { return { ok: false, error: (e as Error).message }; }
+  try { root = parseXml(source, lim); } catch (e) { return { ok: false, error: (e as Error).message }; }
   if (root.name !== "svg") return { ok: false, error: `the root must be <svg>, not <${root.name}>` };
 
   const dropped = new Set<string>();
@@ -159,7 +162,7 @@ export function sanitizeSvg(source: string): SvgResult {
   const attrValue = (name: string, v: string, tag: string): string | null => {
     const kind = KIND[name];
     if (!kind) return null;
-    if (v.length > SVG_LIMITS.attr) return null;
+    if (v.length > lim.attr) return null;
     const t = v.trim();
     switch (kind) {
       case "len": return LEN.test(t) ? t : null;

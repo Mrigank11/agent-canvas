@@ -26,22 +26,27 @@ const TOOLS = [
 const notes = (n: string[]) => (n.length ? `\nNote:\n- ${n.join("\n- ")}` : "");
 const text = (t: string, isError = false) => ({ content: [{ type: "text", text: t }], isError });
 
-export function callTool(hub: Hub, agentId: string, name: string, args: any) {
+export async function callTool(hub: Hub, agentId: string, name: string, args: any) {
   if (name === "canvas_set") {
-    const r = hub.set(agentId, String(args?.source ?? ""));
-    return r.ok ? text(`Canvas updated. Element ids: ${r.ids.join(", ")}${notes(r.notes)}`) : text(`Canvas rejected, nothing changed:\n- ${r.errors.join("\n- ")}`, true);
+    const source = String(args?.source ?? "");
+    const pre = await hub.prepare(agentId, { source });
+    if (!pre.ok) return text(`Canvas rejected, nothing changed:\n- ${pre.errors.join("\n- ")}`, true);
+    const r = hub.set(agentId, source);
+    return r.ok ? text(`Canvas updated. Element ids: ${r.ids.join(", ")}${notes([...r.notes, ...pre.notes])}`) : text(`Canvas rejected, nothing changed:\n- ${r.errors.join("\n- ")}`, true);
   }
   if (name === "canvas_patch") {
     const ops = Array.isArray(args?.ops) ? (args.ops as PatchOp[]) : [];
+    const pre = await hub.prepare(agentId, { ops });
+    if (!pre.ok) return text(`Patch rejected, nothing changed:\n- ${pre.errors.join("\n- ")}`, true);
     const r = hub.patch(agentId, ops);
-    return r.ok ? text(`Patched.${notes(r.notes)}`) : text(`Patch rejected, nothing changed:\n- ${r.errors.join("\n- ")}`, true);
+    return r.ok ? text(`Patched.${notes([...r.notes, ...pre.notes])}`) : text(`Patch rejected, nothing changed:\n- ${r.errors.join("\n- ")}`, true);
   }
   if (name === "canvas_get") return text(hub.source(agentId) ?? "No canvas yet.");
   return text(`unknown tool ${name}`, true);
 }
 
 /** Handle one JSON-RPC message; null means "no response" (a notification). */
-export function handleRpc(hub: Hub, key: string, msg: Rpc) {
+export async function handleRpc(hub: Hub, key: string, msg: Rpc) {
   const reply = (result: unknown) => ({ jsonrpc: "2.0" as const, id: msg.id ?? null, result });
   const fail = (code: number, message: string) => ({ jsonrpc: "2.0" as const, id: msg.id ?? null, error: { code, message } });
   if (msg.id === undefined) return null;
@@ -52,7 +57,7 @@ export function handleRpc(hub: Hub, key: string, msg: Rpc) {
     case "tools/call": {
       const agentId = hub.resolve(key);
       if (!agentId) return reply(text("This canvas is not attached to an agent yet. Try again in a moment.", true));
-      return reply(callTool(hub, agentId, String(msg.params?.name), msg.params?.arguments));
+      return reply(await callTool(hub, agentId, String(msg.params?.name), msg.params?.arguments));
     }
     default: return fail(-32601, `method not found: ${msg.method}`);
   }

@@ -226,24 +226,6 @@ function Diff({ plan }: { plan: Extract<BlockPlan, { kind: "diff" }> }) {
   );
 }
 
-function Chart({ plan }: { plan: Extract<BlockPlan, { kind: "chart" }> }) {
-  // No SVG in the plugin UI kit: both kinds draw as labelled bars natively (the browser view draws the real line).
-  const max = Math.max(...plan.points.map((p) => p.value), 1);
-  return (
-    <Section>
-      {plan.label ? <SectionLabel text={plan.label} /> : null}
-      {plan.points.map((p, i) => (
-        <View key={i} style={{ gap: 4 }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-            <Meta>{p.label}</Meta>
-            <Txt role="label" c="fg">{p.value}</Txt>
-          </View>
-          <Bar pct={(p.value / max) * 100} tone="run" height={6} />
-        </View>
-      ))}
-    </Section>
-  );
-}
 
 /** A Grid: `cols` columns on a wide surface, one on a compact one (the rule is gridColumns in shared/ui-spec). */
 function GridView({ plan, agentId, askVariant, dense }: { plan: Extract<BlockPlan, { kind: "grid" }>; agentId: string; askVariant?: "panel" | "flat"; dense?: boolean }) {
@@ -309,7 +291,6 @@ export function BlockView({ plan, agentId, askVariant, dense }: { plan: BlockPla
       );
     case "ask": return <AskPanel plan={plan} agentId={agentId} variant={askVariant} />;
     case "diff": return <Diff plan={plan} />;
-    case "chart": return <Chart plan={plan} />;
     case "markdown": return <View style={{ gap: 8 }}>{plan.blocks.map((b, i) => <MdBlockView key={i} b={b} />)}</View>;
     case "svg": return <AssetImage hash={plan.hash} w={plan.w} h={plan.h} alt={plan.alt} label="Drawing" />;
     case "image": return <AssetImage hash={plan.hash} w={plan.w} h={plan.h} alt={plan.alt} label="Image" />;

@@ -58,7 +58,7 @@ export function startHttp(hub: Hub, port: number, host: string, log: (m: string)
         if (g) {
           let msg: any;
           try { msg = JSON.parse(raw); } catch { return json(res, 400, { jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } }); }
-          const out = Array.isArray(msg) ? msg.map((x) => handleRpc(hub, g![1], x)).filter(Boolean) : handleRpc(hub, g[1], msg);
+          const out = Array.isArray(msg) ? (await Promise.all(msg.map((x) => handleRpc(hub, g![1], x)))).filter(Boolean) : await handleRpc(hub, g[1], msg);
           if (out === null || (Array.isArray(out) && !out.length)) { res.writeHead(202); return void res.end(); }
           return json(res, 200, out);
         }
@@ -70,10 +70,10 @@ export function startHttp(hub: Hub, port: number, host: string, log: (m: string)
           if (g[2]) {
             let ops: PatchOp[];
             try { ops = JSON.parse(raw); } catch { return json(res, 400, { ok: false, errors: ["body must be a JSON array of ops"] }); }
-            const r = callTool(hub, agentId, "canvas_patch", { ops });
+            const r = await callTool(hub, agentId, "canvas_patch", { ops });
             return json(res, r.isError ? 422 : 200, { ok: !r.isError, message: r.content[0].text });
           }
-          const r = callTool(hub, agentId, "canvas_set", { source: raw });
+          const r = await callTool(hub, agentId, "canvas_set", { source: raw });
           return json(res, r.isError ? 422 : 200, { ok: !r.isError, message: r.content[0].text });
         }
         if (path === "/api/answer") {

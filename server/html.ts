@@ -16,17 +16,6 @@ const unavailable = (what: string, alt: string) => `<div class="figmiss">${esc(a
 const figure = (hash: string | null, alt: string, w: number, h: number) =>
   hash ? `<figure class="fig"><img src="/asset/${esc(hash)}" alt="${esc(alt)}"${w && h ? ` width="${w}" height="${h}"` : ""} loading="lazy"></figure>` : unavailable("Image", alt);
 
-function lineChart(points: { label: string; value: number }[]): string {
-  const W = 360, H = 110, pad = 18;
-  const max = Math.max(...points.map((p) => p.value), 1);
-  const step = points.length > 1 ? (W - pad * 2) / (points.length - 1) : 0;
-  const xy = points.map((p, i) => [pad + step * i, H - pad - (p.value / max) * (H - pad * 2 - 8)] as const);
-  const path = xy.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
-  const area = `${path} L${xy[xy.length - 1][0].toFixed(1)},${H - pad} L${xy[0][0].toFixed(1)},${H - pad} Z`;
-  return `<svg class="svgchart" viewBox="0 0 ${W} ${H}" role="img"><defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--run)" stop-opacity=".18"/><stop offset="1" stop-color="var(--run)" stop-opacity="0"/></linearGradient></defs>
-    <line x1="${pad}" x2="${W - pad}" y1="${H - pad}" y2="${H - pad}" stroke="var(--line-strong)"/><path d="${area}" fill="url(#ag)"/><path d="${path}" fill="none" stroke="var(--run)" stroke-width="2"/>
-    ${xy.map(([x, y], i) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="var(--bg)" stroke="var(--run)" stroke-width="2"/><text class="v" x="${x.toFixed(1)}" y="${(y - 8).toFixed(1)}" text-anchor="middle">${esc(points[i].value)}</text><text x="${x.toFixed(1)}" y="${H - 4}" text-anchor="middle">${esc(points[i].label)}</text>`).join("")}</svg>`;
-}
 
 const mdInline = (c: Inline[]): string =>
   c.map((i) => {
@@ -76,11 +65,6 @@ export function renderPlan(p: BlockPlan, agentId: string, ctx: RenderCtx = {}): 
       return `<div class="ask"><div class="slabel">${sd("hot", { halo: false, pulse: false, size: 6 })}<span>Question</span></div><div class="q">${esc(p.question)}</div><div class="btns">${p.options.map((o) => button("secondary", o.label, `data-agent="${esc(agentId)}" data-ask="${esc(p.id)}" data-value="${esc(o.value)}"`)).join("")}</div></div>`;
     case "diff":
       return `<div class="sec">${p.file ? `<div class="pathrow"><span class="path">${esc(p.file)}</span><span class="dstat"><span class="a">+${p.add}</span> <span class="d">−${p.del}</span></span></div>` : ""}<div class="well">${p.lines.map((l) => `<span class="${l.kind === "ctx" ? "" : l.kind}">${esc(l.text || " ")}</span>`).join("")}</div></div>`;
-    case "chart": {
-      const max = Math.max(...p.points.map((q) => q.value), 1);
-      const body = p.line ? lineChart(p.points) : `<div class="chartrows">${p.points.map((q) => `<div><div class="top"><span>${esc(q.label)}</span><b style="font-weight:500">${esc(q.value)}</b></div>${bar((q.value / max) * 100, "run")}</div>`).join("")}</div>`;
-      return `<div class="sec">${p.label ? slabel(p.label) : ""}${body}</div>`;
-    }
     case "markdown": return `<div class="md">${p.blocks.map(mdBlock).join("")}</div>`;
     case "svg": {
       const svg = p.hash ? ctx.svg?.(p.hash) : null;

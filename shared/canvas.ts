@@ -3,7 +3,9 @@
 // this file produces, so nothing downstream ever sees agent-supplied code.
 
 import { codeToMarkdown, imagesOf, linkToMarkdown, noteToMarkdown, parseMarkdown, tableToMarkdown } from "./markdown.ts";
+import { DOT_LIMITS, prepareDot } from "./dot.ts";
 import { SVG_LIMITS, sanitizeSvg } from "./svg.ts";
+import { VEGA_LIMITS, checkVegaSpec, legacyChartSpec } from "./vegaspec.ts";
 
 export type AttrValue = string | number | boolean;
 export type Node = {
@@ -35,7 +37,7 @@ type TagSpec = {
   parents?: readonly string[];
 };
 
-export const BLOCKS = ["Bluf", "Steps", "Progress", "Metric", "Decision", "Ask", "Markdown", "Svg", "Image", "Diff", "Chart", "Table", "Link", "Note", "Code", "Grid", "Collapse"] as const;
+export const BLOCKS = ["Bluf", "Steps", "Progress", "Metric", "Decision", "Ask", "Markdown", "Svg", "Image", "Diagram", "Diff", "Chart", "Table", "Link", "Note", "Code", "Grid", "Collapse"] as const;
 /** Retired in v3: still parsed for one release, then converted to a Markdown node (see `convertRetired`). */
 export const RETIRED = ["Table", "Link", "Note", "Code"] as const;
 /** <Grid cols>: 1 to this many columns. */
@@ -65,7 +67,9 @@ export const VOCABULARY: Record<string, TagSpec> = {
   Svg: { attrs: { alt: { type: "string", max: 200 } }, children: [], text: true, raw: true, maxText: SVG_LIMITS.chars },
   Image: { attrs: { src: { type: "string", required: true, max: 500 }, alt: { type: "string", max: 200 } }, children: [], text: false },
   Diff: { attrs: { file: { type: "string", max: 200 } }, children: [], text: true, raw: true },
-  Chart: { attrs: { kind: { type: "enum", values: ["bar", "line"] }, title: { type: "string", max: 80 }, data: { type: "string", required: true, max: 2000 } }, children: [], text: false },
+  Diagram: { attrs: { lang: { type: "enum", values: ["dot"], required: true }, alt: { type: "string", max: 200 } }, children: [], text: true, raw: true, maxText: DOT_LIMITS.chars },
+  /** `lang="vega-lite"` + a JSON spec body. The old `kind`/`title`/`data` form is retired: accepted, then converted to a spec (`convertRetired`). */
+  Chart: { attrs: { lang: { type: "enum", values: ["vega-lite"] }, alt: { type: "string", max: 200 }, kind: { type: "enum", values: ["bar", "line"] }, title: { type: "string", max: 80 }, data: { type: "string", max: 2000 } }, children: [], text: true, raw: true, maxText: VEGA_LIMITS.chars },
   Table: { attrs: { cols: { type: "string", required: true, max: 400 } }, children: ["Row"], text: false },
   Row: { attrs: {}, children: [], text: true, parents: ["Table"] },
   Link: { attrs: { href: { type: "string", required: true, max: 500 } }, children: [], text: true },
@@ -73,7 +77,7 @@ export const VOCABULARY: Record<string, TagSpec> = {
   Code: { attrs: { lang: { type: "string", max: 20 } }, children: [], text: true, raw: true },
 };
 
-/** `rich`: Svg and Image blocks plus Markdown images; each costs a render and a cached asset. */
+/** `rich`: Svg, Diagram, Chart and Image blocks plus Markdown images; each costs a render and a cached asset. */
 export const LIMITS = { source: 96_000, nodes: 300, depth: 5, text: 4_000, rich: 8 };
 const ID_RE = /^[a-z][a-z0-9_-]{0,31}$/i;
 const ENTITIES: Record<string, string> = { "&lt;": "<", "&gt;": ">", "&amp;": "&", "&quot;": '"', "&apos;": "'" };
@@ -231,11 +235,27 @@ function finish(raw: RawNode, parent: string | null, depth: number, ids: Set<str
     const svg = sanitizeSvg(raw.text);
     if (!svg.ok) errors.push({ message: `<Svg>: ${svg.error}`, ...where, id });
   }
+  if (raw.tag === "Diagram") {
+    total.rich = (total.rich ?? 0) + 1;
+    const d = prepareDot(raw.text);
+    if (!d.ok) errors.push({ message: `<Diagram>: ${d.error}`, ...where, id });
+  }
+  if (raw.tag === "Chart") {
+    total.rich = (total.rich ?? 0) + 1;
+    if (raw.attrs.lang === undefined) {
+      if (raw.text) errors.push({ message: '<Chart> with a body needs lang="vega-lite"', ...where, id });
+      else if (raw.attrs.data === undefined) errors.push({ message: '<Chart> needs lang="vega-lite" and a Vega-Lite JSON spec as its body', ...where, id });
+      else if (chartPoints(String(raw.attrs.data)) === null) errors.push({ message: 'Chart data must look like "a:1,b:2.5"', ...where, id });
+    } else {
+      if (raw.attrs.data !== undefined || raw.attrs.kind !== undefined) errors.push({ message: '<Chart lang="vega-lite"> takes its data and mark from the spec, not data=/kind=', ...where, id });
+      const c = checkVegaSpec(raw.text);
+      if (!c.ok) errors.push({ message: `<Chart>: ${c.error}`, ...where, id });
+    }
+  }
   if (raw.tag === "Image") total.rich = (total.rich ?? 0) + 1;
   if (raw.tag === "Link" && !/^https?:\/\//i.test(String(raw.attrs.href ?? ""))) errors.push({ message: "<Link> href must start with http:// or https://", ...where, id });
   for (const c of raw.children) node.children.push(finish(c, raw.tag, depth + 1, ids, counts, total, errors));
   if (raw.tag === "Ask" && node.children.length < 1) errors.push({ message: "<Ask> needs at least one <Option>", ...where, id });
-  if (raw.tag === "Chart" && chartPoints(String(raw.attrs.data ?? "")) === null) errors.push({ message: 'Chart data must look like "a:1,b:2.5"', ...where, id });
   return node;
 }
 
@@ -253,7 +273,7 @@ export function parseCanvas(source: string): ParseResult {
 }
 
 /**
- * Table, Link, Note and Code are retired: they validate as before, then become the equivalent <Markdown> node
+ * Table, Link, Note, Code and the data=/kind= Chart are retired: they validate as before, then become the equivalent <Markdown> node
  * (same id), so every tree downstream, including patch round-trips, only ever sees the new vocabulary.
  */
 function convertRetired(root: Node, errors: Problem[]) {
@@ -269,6 +289,11 @@ function convertRetired(root: Node, errors: Problem[]) {
       case "Note": return markdown(n, noteToMarkdown(n.attrs.tone as string | undefined, n.text));
       case "Link": return markdown(n, linkToMarkdown(String(n.attrs.href), n.text));
       case "Code": return markdown(n, codeToMarkdown(n.attrs.lang as string | undefined, n.text));
+      case "Chart": {
+        if (n.attrs.lang !== undefined) return n;
+        const spec = legacyChartSpec(n.attrs.kind as string | undefined, n.attrs.title as string | undefined, chartPoints(String(n.attrs.data)) ?? []);
+        return { tag: "Chart", id: n.id, attrs: { lang: "vega-lite", ...(n.attrs.title ? { alt: String(n.attrs.title) } : {}) }, text: spec, children: [] };
+      }
       default: return n;
     }
   };

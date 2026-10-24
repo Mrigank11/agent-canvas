@@ -2,7 +2,7 @@
 // The native and browser renderers draw from the same plan, so what a block means (which signal, which glyph,
 // which cell is best) is decided here once. Renderers only decide how to paint it.
 import { mapImages, parseMarkdown, type MdBlock } from "./markdown.ts";
-import { chartPoints, type Node, type StepState } from "./canvas.ts";
+import { type Node, type StepState } from "./canvas.ts";
 import { bgFacts, checkHonesty, summarize, type Verdict } from "./honesty.ts";
 import type { CanvasView } from "./contract.ts";
 import { pillState } from "./pill.ts";
@@ -19,12 +19,11 @@ export type BlockPlan =
   | { kind: "decision"; id: string; label: string; chosen: string | null; reason: string }
   | { kind: "ask"; id: string; question: string; answered: string | null; options: { value: string; label: string }[] }
   | { kind: "diff"; id: string; file: string | null; add: number; del: number; lines: DiffLine[] }
-  | { kind: "chart"; id: string; label: string | null; line: boolean; points: { label: string; value: number }[] }
   | { kind: "markdown"; id: string; blocks: MdBlock[] }
   /** Layout: `cols` is the wide-screen count (a compact surface draws one). `open` is forced when an unanswered Ask is inside. */
   | { kind: "grid"; id: string; cols: number; children: BlockPlan[] }
   | { kind: "collapse"; id: string; title: string; open: boolean; children: BlockPlan[] }
-  /** `hash`: the server's artefact for it (null when the client was given the raw tree, or the artefact is gone: drawn as `alt`). */
+  /** An agent drawing, a DOT diagram or a Vega-Lite chart: all three end as one rebuilt SVG artefact. `hash`: the server's artefact for it (null when the client was given the raw tree, or the artefact is gone: drawn as `alt`). */
   | { kind: "svg"; id: string; hash: string | null; alt: string; w: number; h: number }
   | { kind: "image"; id: string; hash: string | null; alt: string; src: string; w: number; h: number };
 
@@ -65,7 +64,6 @@ export function planBlock(n: Node): BlockPlan | null {
       const lines = diffLines(n.text);
       return { kind: "diff", id: n.id, file: n.attrs.file ? String(n.attrs.file) : null, add: lines.filter((l) => l.kind === "add" && !l.text.startsWith("+++")).length, del: lines.filter((l) => l.kind === "del" && !l.text.startsWith("---")).length, lines };
     }
-    case "Chart": return { kind: "chart", id: n.id, label: n.attrs.title ? String(n.attrs.title) : null, line: n.attrs.kind === "line", points: chartPoints(String(n.attrs.data)) ?? [] };
     case "Markdown": {
       const md = parseMarkdown(n.text);
       let found: Record<string, { hash: string; w: number; h: number }> = {};
@@ -73,7 +71,7 @@ export function planBlock(n: Node): BlockPlan | null {
       const blocks = md.ok ? mapImages(md.blocks, (b) => (found[b.src] ? { ...b, ...found[b.src] } : b)) : [{ k: "paragraph" as const, c: [{ t: "text" as const, v: n.text }] }];
       return { kind: "markdown", id: n.id, blocks };
     }
-    case "Svg": return { kind: "svg", id: n.id, alt: String(n.attrs.alt ?? ""), ...assetOf(n.attrs) };
+    case "Svg": case "Diagram": case "Chart": return { kind: "svg", id: n.id, alt: String(n.attrs.alt ?? ""), ...assetOf(n.attrs) };
     case "Image": return { kind: "image", id: n.id, alt: String(n.attrs.alt ?? ""), src: String(n.attrs.src), ...assetOf(n.attrs) };
     case "Grid": return { kind: "grid", id: n.id, cols: Math.max(1, Math.min(3, Number(n.attrs.cols ?? 2) || 2)), children: planBlocks(n) };
     case "Collapse": return { kind: "collapse", id: n.id, title: String(n.attrs.title), open: n.attrs.open === true || hasOpenAsk(n), children: planBlocks(n) };

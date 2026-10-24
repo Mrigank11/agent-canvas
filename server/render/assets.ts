@@ -9,7 +9,9 @@ import { walk, type Node } from "../../shared/canvas.ts";
 import { imagesOf, parseMarkdown } from "../../shared/markdown.ts";
 import { sanitizeSvg } from "../../shared/svg.ts";
 import { readWorkspaceImage, sniffImage, type Mime } from "./images.ts";
+import { renderDot } from "./dot.ts";
 import { clampWidth, rasterize, type Theme } from "./raster.ts";
+import { renderVega } from "./vega.ts";
 
 export const HASH_RE = /^[0-9a-f]{32}$/;
 const hashOf = (...parts: (string | Buffer)[]) => { const h = createHash("sha256"); for (const p of parts) { h.update(p); h.update("\0"); } return h.digest("hex").slice(0, 32); };
@@ -21,8 +23,9 @@ export type Validated = { ok: true; art: Artefact; notes: string[] } | { ok: fal
 
 /**
  * One rich format. `validate` is synchronous because canvas_set is: a block that cannot render fails the tool call.
- * `inline` is the browser form, `raster` the native one; DOT (S3) and Vega-Lite (S4) will be two more of these,
- * both ending in SVG, so they reuse `rasterize` and the svg renderer's `inline`.
+ * `inline` is the browser form, `raster` the native one. DOT and Vega-Lite are two more of these, both ending in
+ * SVG, so they share the svg store, `inline` and `rasterize`; their (async) layout happens first, in `Assets.prepare`,
+ * and `validate` then only looks the result up.
  */
 export interface RichRenderer<In> {
   readonly name: string;
@@ -71,7 +74,7 @@ export class Assets {
   /** Drop cached files not touched for a week, once at start-up. */
   private prune() {
     const cutoff = this.now() - 7 * 86_400_000;
-    for (const sub of ["png", "img"]) {
+    for (const sub of ["png", "img", "svg"]) {
       try {
         for (const f of readdirSync(this.path(sub))) {
           try { if (statSync(this.path(sub, f)).mtimeMs < cutoff) unlinkSync(this.path(sub, f)); } catch { /* raced */ }
@@ -91,15 +94,41 @@ export class Assets {
       this.svgs.set(hash, { svg: r.svg, w: r.w, h: r.h });
       return { ok: true, art: { hash, w: r.w, h: r.h }, notes: r.dropped.length ? [`removed ${r.dropped.join(", ")}`] : [] };
     },
-    inline: (hash) => this.svgs.get(hash)?.svg ?? null,
+    inline: (hash) => this.stored(hash)?.svg ?? null,
     raster: async (hash, theme, width) => {
-      const e = this.svgs.get(hash);
+      const e = this.stored(hash);
       if (!e) return null;
       const w = clampWidth(width);
       const r = await this.cachedPng(`${hash}-${theme}-${w}`, () => rasterize(e.svg, theme, w));
       return { mime: "image/png", bytes: r.bytes, w: r.w, h: r.h };
     },
   };
+
+  /** A rendered diagram or chart by hash: memory, then the disk cache (so a restarted daemon can still wire a saved canvas). */
+  private stored(hash: string): { svg: string; w: number; h: number } | null {
+    const hit = this.svgs.get(hash);
+    if (hit) return hit;
+    const disk = this.get("svg", `${hash}.svg`)?.toString("utf8");
+    const vb = disk && /^<svg [^>]*viewBox="0 0 ([\d.]+) ([\d.]+)"/.exec(disk);
+    if (!disk || !vb) return null;
+    const e = { svg: disk, w: Number(vb[1]), h: Number(vb[2]) };
+    this.svgs.set(hash, e);
+    return e;
+  }
+  private generated(name: string, version: string): RichRenderer<string> {
+    return {
+      name,
+      validate: (body) => {
+        const hash = hashOf(version, body);
+        const e = this.stored(hash);
+        return e ? { ok: true, art: { hash, w: e.w, h: e.h }, notes: [] } : { ok: false, error: "it has not been rendered (internal: call prepare first)" };
+      },
+      inline: (hash) => this.svg.inline(hash),
+      raster: (hash, theme, width) => this.svg.raster(hash, theme, width),
+    };
+  }
+  readonly dot = this.generated("dot", "dot1");
+  readonly vega = this.generated("vega-lite", "vega1");
 
   readonly image: RichRenderer<string> = {
     name: "image",
@@ -158,6 +187,28 @@ export class Assets {
 
   // ---------- over a whole canvas ----------
 
+  /**
+   * The async half of validation: lay out every <Diagram> and draw every <Chart> (Graphviz in a worker with a timeout, Vega in
+   * process), keep the SVG under its content hash, and report what could not be drawn. Run before `check`; a body seen before is free.
+   */
+  async prepare(root: Node): Promise<{ ok: true; notes: string[] } | { ok: false; errors: string[] }> {
+    const errors: string[] = [], notes: string[] = [];
+    const jobs: { n: Node; hash: string; run: () => ReturnType<typeof renderDot> }[] = [];
+    walk(root, (n) => {
+      if (n.tag === "Diagram") jobs.push({ n, hash: hashOf("dot1", n.text), run: () => renderDot(n.text) });
+      else if (n.tag === "Chart" && n.attrs.lang === "vega-lite") jobs.push({ n, hash: hashOf("vega1", n.text), run: () => renderVega(n.text) });
+    });
+    for (const j of jobs) {
+      if (this.stored(j.hash)) continue;
+      const r = await j.run();
+      if (!r.ok) { errors.push(`<${j.n.tag} id="${j.n.id}">: ${r.error}`); continue; }
+      this.svgs.set(j.hash, { svg: r.svg, w: r.w, h: r.h });
+      this.put("svg", `${j.hash}.svg`, r.svg);
+      for (const x of r.notes) notes.push(`<${j.n.tag} id="${j.n.id}"> ${x}`);
+    }
+    return errors.length ? { ok: false, errors } : { ok: true, notes };
+  }
+
   /** After `parseCanvas`: every image must resolve inside the workspace. (Svg is validated by the parser itself; this registers it and reports what was removed.) */
   check(root: Node, cwd: string | null): { ok: true; notes: string[] } | { ok: false; errors: string[] } {
     const errors: string[] = [], notes: string[] = [];
@@ -165,6 +216,9 @@ export class Assets {
       if (n.tag === "Svg") {
         const v = this.svg.validate(n.text, { cwd });
         if (!v.ok) errors.push(`<Svg id="${n.id}">: ${v.error}`); else for (const x of v.notes) notes.push(`<Svg id="${n.id}"> ${x}`);
+      } else if (n.tag === "Diagram" || (n.tag === "Chart" && n.attrs.lang === "vega-lite")) {
+        const v = (n.tag === "Diagram" ? this.dot : this.vega).validate(n.text, { cwd });
+        if (!v.ok) errors.push(`<${n.tag} id="${n.id}">: ${v.error}`);
       } else if (n.tag === "Image") {
         this.memo.delete(`${cwd}\0${String(n.attrs.src)}`); // a write is the moment to look at the file afresh
         const v = this.image.validate(String(n.attrs.src), { cwd });
@@ -190,6 +244,10 @@ export class Assets {
       const children = n.children.map(one);
       if (n.tag === "Svg") {
         const v = this.svg.validate(n.text, { cwd });
+        return { ...n, text: "", children, attrs: v.ok ? { ...n.attrs, hash: v.art.hash, w: v.art.w, h: v.art.h } : { ...n.attrs } };
+      }
+      if (n.tag === "Diagram" || (n.tag === "Chart" && n.attrs.lang === "vega-lite")) {
+        const v = (n.tag === "Diagram" ? this.dot : this.vega).validate(n.text, { cwd });
         return { ...n, text: "", children, attrs: v.ok ? { ...n.attrs, hash: v.art.hash, w: v.art.w, h: v.art.h } : { ...n.attrs } };
       }
       if (n.tag === "Image") {
@@ -225,13 +283,13 @@ export class Assets {
   /** What the phone shows for a hash: a PNG (or the small original) as base64. */
   async asset(hash: string, theme: Theme, width: number): Promise<{ mime: string; base64: string; w: number; h: number } | null> {
     if (!HASH_RE.test(hash)) return null;
-    if (!this.images.has(hash) && !this.svgs.has(hash)) {
+    if (!this.images.has(hash) && !this.stored(hash)) {
       // after a restart the in-memory entry is gone: images come back from the disk cache, drawings from the next wire()
       const f = this.file(hash);
       const s = f && sniff(f.bytes);
       if (f && s) this.images.set(hash, { bytes: f.bytes, mime: f.mime, w: s.w, h: s.h });
     }
-    const r = this.svgs.has(hash) ? await this.svg.raster(hash, theme, width) : await this.image.raster(hash, theme, width);
+    const r = this.stored(hash) ? await this.svg.raster(hash, theme, width) : await this.image.raster(hash, theme, width);
     return r ? { mime: r.mime, base64: r.bytes.toString("base64"), w: r.w, h: r.h } : null;
   }
 }

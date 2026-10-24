@@ -28,23 +28,23 @@ function fake(opts: { status?: string; items?: any[]; maxSeq?: number } = {}) {
 const wait = (ms = 320) => new Promise((r) => setTimeout(r, ms));
 const hub = (extra = {}) => new Hub({ log: () => {}, stateFile: null, publicBase: "http://h:1", localBase: "http://127.0.0.1:1", policy: () => ({ defaultOn: true, autoCanvas: true }), ...extra });
 const CANVAS = `<Canvas title="T" status="working"><Steps id="s"><Step id="a" state="active">a</Step></Steps><Ask id="q" question="Q?"><Option value="y">Yes</Option></Ask></Canvas>`;
-const tool = (h: Hub, key: string, name: string, args: unknown) => (handleRpc(h, key, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) as any).result;
+const tool = async (h: Hub, key: string, name: string, args: unknown) => (await handleRpc(h, key, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) as any).result;
 
-test("a creation token binds to the agent id and the MCP tools then act on that agent", () => {
+test("a creation token binds to the agent id and the MCP tools then act on that agent", async () => {
   const h = hub();
   const token = h.mintToken("/work/x");
   assert.equal(h.resolve(token), null);
-  assert.match(tool(h, token, "canvas_set", { source: CANVAS }).content[0].text, /not attached/);
+  assert.match((await tool(h, token, "canvas_set", { source: CANVAS })).content[0].text, /not attached/);
   h.bind(token, "agent-1");
   assert.equal(h.resolve(token), "agent-1");
-  const r = tool(h, token, "canvas_set", { source: CANVAS });
+  const r = (await tool(h, token, "canvas_set", { source: CANVAS }));
   assert.equal(r.isError, false);
   assert.match(r.content[0].text, /Element ids: .*s, a, q/);
-  assert.equal(tool(h, token, "canvas_patch", { ops: [{ id: "a", set: { state: "done" } }] }).isError, false);
-  assert.match(tool(h, token, "canvas_get", {}).content[0].text, /state="done"/);
+  assert.equal((await tool(h, token, "canvas_patch", { ops: [{ id: "a", set: { state: "done" } }] })).isError, false);
+  assert.match((await tool(h, token, "canvas_get", {})).content[0].text, /state="done"/);
 });
 
-test("the cwd fallback binds a fresh agent to the newest pending token", () => {
+test("the cwd fallback binds a fresh agent to the newest pending token", async () => {
   const h = hub();
   const t = h.mintToken("/work/y");
   h.bindByCwd("agent-2", "/other");
@@ -53,25 +53,25 @@ test("the cwd fallback binds a fresh agent to the newest pending token", () => {
   assert.equal(h.resolve(t), "agent-2");
 });
 
-test("validation errors come back to the agent and change nothing", () => {
+test("validation errors come back to the agent and change nothing", async () => {
   const h = hub();
   h.bind(h.mintToken("/"), "a1");
-  const r = tool(h, [...(h as any).tokens.keys()][0], "canvas_set", { source: `<Canvas title="x"><script>1</script></Canvas>` });
+  const r = (await tool(h, [...(h as any).tokens.keys()][0], "canvas_set", { source: `<Canvas title="x"><script>1</script></Canvas>` }));
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /not in the vocabulary/);
   assert.equal(h.source("a1"), null);
-  assert.match(tool(h, "a1", "canvas_patch", { ops: [{ id: "x", set: {} }] }).content[0].text, /no canvas yet/);
+  assert.match((await tool(h, "a1", "canvas_patch", { ops: [{ id: "x", set: {} }] })).content[0].text, /no canvas yet/);
 });
 
-test("MCP protocol: initialize, tools/list, notifications and unknown methods", () => {
+test("MCP protocol: initialize, tools/list, notifications and unknown methods", async () => {
   const h = hub();
-  const init = handleRpc(h, "k", { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } }) as any;
+  const init = (await handleRpc(h, "k", { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } })) as any;
   assert.equal(init.result.protocolVersion, "2025-06-18");
-  const list = handleRpc(h, "k", { jsonrpc: "2.0", id: 2, method: "tools/list" }) as any;
+  const list = (await handleRpc(h, "k", { jsonrpc: "2.0", id: 2, method: "tools/list" })) as any;
   assert.deepEqual(list.result.tools.map((t: any) => t.name), ["canvas_set", "canvas_patch", "canvas_get"]);
   assert.match(list.result.tools[0].description, /<Steps/);
-  assert.equal(handleRpc(h, "k", { jsonrpc: "2.0", method: "notifications/initialized" }), null);
-  assert.equal((handleRpc(h, "k", { jsonrpc: "2.0", id: 3, method: "nope" }) as any).error.code, -32601);
+  assert.equal((await handleRpc(h, "k", { jsonrpc: "2.0", method: "notifications/initialized" })), null);
+  assert.equal(((await handleRpc(h, "k", { jsonrpc: "2.0", id: 3, method: "nope" })) as any).error.code, -32601);
 });
 
 test("answering an Ask records it, tells the agent, and refuses a second answer or a bad option", async () => {
@@ -169,7 +169,7 @@ test("a canvas restored from disk is dropped when its agent is gone, but a live 
   second.stop();
 });
 
-test("archiving forgets the agent", () => {
+test("archiving forgets the agent", async () => {
   const h = hub();
   h.set("a1", CANVAS);
   assert.ok(h.view("a1"));
@@ -177,7 +177,7 @@ test("archiving forgets the agent", () => {
   assert.equal(h.view("a1"), null);
 });
 
-test("HTML escapes everything the agent wrote and has no script", () => {
+test("HTML escapes everything the agent wrote and has no script", async () => {
   const h = hub();
   const evil = `<Canvas title="&lt;img src=x onerror=alert(1)&gt;"><Bluf>&lt;script&gt;alert(1)&lt;/script&gt;</Bluf><Link href="https://e.com/?a=1&amp;b=&quot;x">&lt;b&gt;x</Link><Code></pre><script>1</script></Code></Canvas>`;
   const r = h.set("a1", evil);
@@ -188,7 +188,7 @@ test("HTML escapes everything the agent wrote and has no script", () => {
   assert.equal(esc(`"<&>`), "&quot;&lt;&amp;&gt;");
 });
 
-test("the strip in the browser view comes from Paseo, so a canvas that lies is flagged there", () => {
+test("the strip in the browser view comes from Paseo, so a canvas that lies is flagged there", async () => {
   const h = hub();
   h.set("a1", `<Canvas title="T" status="done"><Bluf>All done.</Bluf></Canvas>`);
   const v = { ...h.view("a1")!, runState: "running" as const, callsNow: 5 };

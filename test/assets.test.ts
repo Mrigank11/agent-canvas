@@ -37,7 +37,7 @@ const fakePng = (w: number, h: number, pad = 0) => {
 
 // ---------- <Image> and Markdown images: the workspace rules ----------
 
-test("png, jpeg, webp (lossy and lossless) and gif inside the workspace are accepted, by their bytes", () => {
+test("png, jpeg, webp (lossy and lossless) and gif inside the workspace are accepted, by their bytes", async () => {
   const ws = workspace();
   for (const [f, mime] of [["pic.png", "image/png"], ["pic.jpg", "image/jpeg"], ["pic.webp", "image/webp"], ["pic-ll.webp", "image/webp"], ["pic.gif", "image/gif"]] as const) {
     const r = readWorkspaceImage(ws, f);
@@ -52,7 +52,7 @@ test("png, jpeg, webp (lossy and lossless) and gif inside the workspace are acce
   assert.ok(readWorkspaceImage(ws, join(ws, "out", "c.png")).ok); // an absolute path inside the workspace is fine
 });
 
-test("paths that leave the workspace, symlink out of it, or are URLs are refused", () => {
+test("paths that leave the workspace, symlink out of it, or are URLs are refused", async () => {
   const outer = tmp();
   const ws = join(outer, "ws");
   mkdirSync(ws);
@@ -76,7 +76,7 @@ test("paths that leave the workspace, symlink out of it, or are URLs are refused
   assert.equal(readWorkspaceImage(null, "ok.png").ok, false);
 });
 
-test("only the four raster types: text, SVG and mislabelled files are refused", () => {
+test("only the four raster types: text, SVG and mislabelled files are refused", async () => {
   const ws = workspace();
   writeFileSync(join(ws, "fake.png"), "TOKEN=abc123\n");
   writeFileSync(join(ws, "pic.svg"), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>');
@@ -89,7 +89,7 @@ test("only the four raster types: text, SVG and mislabelled files are refused", 
   assert.match(why("d"), /not a file/);
 });
 
-test("size limits: 3 MB, 4096 px a side, decided from the file and its header", () => {
+test("size limits: 3 MB, 4096 px a side, decided from the file and its header", async () => {
   const ws = tmp();
   writeFileSync(join(ws, "wide.png"), fakePng(IMAGE_LIMITS.side + 1, 10));
   writeFileSync(join(ws, "tall.png"), fakePng(10, IMAGE_LIMITS.side + 1));
@@ -106,7 +106,7 @@ test("size limits: 3 MB, 4096 px a side, decided from the file and its header", 
 
 // ---------- the canvas-level checks (what canvas_set sees) ----------
 
-test("canvas_set refuses a canvas whose image is missing, outside the workspace or a URL, naming the block", () => {
+test("canvas_set refuses a canvas whose image is missing, outside the workspace or a URL, naming the block", async () => {
   const ws = workspace();
   const a = new Assets(null);
   const bad = a.check(parse('<Image id="i1" src="nope.png" alt="x" /><Image id="i2" src="https://x.y/a.png" /><Markdown id="m">![out](../../etc/passwd) and ![ok](pic.png)</Markdown>'), ws);
@@ -121,7 +121,7 @@ test("canvas_set refuses a canvas whose image is missing, outside the workspace 
   assert.ok(ok.ok);
 });
 
-test("the Svg and Image tags validate: viewBox, size, attributes, and at most eight pictures", () => {
+test("the Svg and Image tags validate: viewBox, size, attributes, and at most eight pictures", async () => {
   const bad = (src: string) => { const r = parseCanvas(canvas(src)); assert.ok(!r.ok, src); return r.ok ? "" : r.errors.map((e) => e.message).join(); };
   assert.match(bad("<Svg><svg><rect/></svg></Svg>"), /viewBox/);
   assert.match(bad('<Svg><svg viewBox="0 0 9 9"><script>x</script><!DOCTYPE x></svg></Svg>'), /DOCTYPE|not allowed|Svg/);
@@ -134,7 +134,7 @@ test("the Svg and Image tags validate: viewBox, size, attributes, and at most ei
 
 // ---------- what the clients get ----------
 
-test("the wire tree carries hashes and sizes, never the drawing, and stays far under the 64 KiB row cap", () => {
+test("the wire tree carries hashes and sizes, never the drawing, and stays far under the 64 KiB row cap", async () => {
   const ws = workspace();
   const a = new Assets(null);
   const big = (n: number) => SVG().replace("</svg>", "<g>" + `<rect x="1" y="1" width="2" height="2"/>`.repeat(n) + "</g></svg>");
@@ -159,14 +159,14 @@ test("the wire tree carries hashes and sizes, never the drawing, and stays far u
   assert.ok(mdp.kind === "markdown" && mdp.blocks.some((b) => b.k === "image" && b.hash && b.w === 48));
 });
 
-test("without a server-made hash a picture is drawn as its alt text, in the plan and in the HTML", () => {
+test("without a server-made hash a picture is drawn as its alt text, in the plan and in the HTML", async () => {
   const tree = parse(`<Svg alt="the pipeline">${SVG()}</Svg><Image src="x.png" alt="a chart" />`);
   const html = renderCanvas(viewOf(tree), 5000);
   assert.ok(html.includes("Drawing: the pipeline") && html.includes("Image: a chart"), html);
   assert.ok(!html.includes("<svg") && !html.includes("<img"));
 });
 
-test("the browser gets the rebuilt SVG inline and an <img> by hash for images; hostile SVG never reaches the page", () => {
+test("the browser gets the rebuilt SVG inline and an <img> by hash for images; hostile SVG never reaches the page", async () => {
   const ws = workspace();
   const a = new Assets(null);
   const hostile = `<svg viewBox="0 0 100 50" onload="alert(1)"><script>alert(2)</script><foreignObject><div>x</div></foreignObject><image href="http://evil/x.png"/><rect width="10" height="10" fill="url(http://evil/g)" onclick="x()"/><text x="1" y="9">safe &amp; sound</text></svg>`;
@@ -259,16 +259,16 @@ test("the disk cache: renders and images survive a restart, and the original fil
 
 // ---------- end to end through the hub and the tools ----------
 
-const tool = (h: Hub, key: string, name: string, args: unknown) => (handleRpc(h, key, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) as any).result;
+const tool = async (h: Hub, key: string, name: string, args: unknown) => (await handleRpc(h, key, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) as any).result;
 const newHub = () => new Hub({ log: () => {}, stateFile: null, publicBase: "http://h:1", localBase: "http://127.0.0.1:1", policy: () => ({ defaultOn: true, autoCanvas: true }) });
 
-test("canvas_set and canvas_patch take pictures from the agent's workspace and refuse the rest, atomically", () => {
+test("canvas_set and canvas_patch take pictures from the agent's workspace and refuse the rest, atomically", async () => {
   const ws = workspace();
   const h = newHub();
   const token = h.mintToken(ws);
   h.bind(token, "a1");
   assert.equal(h.cwdOf("a1"), ws);
-  const ok = tool(h, token, "canvas_set", { source: canvas(`<Svg id="d" alt="x">${SVG("<!-- c -->").replace("<rect", '<rect onclick="x()"')}</Svg><Image id="i" src="pic.png" alt="p"/><Markdown id="m">![j](pic.jpg)</Markdown>`) });
+  const ok = (await tool(h, token, "canvas_set", { source: canvas(`<Svg id="d" alt="x">${SVG("<!-- c -->").replace("<rect", '<rect onclick="x()"')}</Svg><Image id="i" src="pic.png" alt="p"/><Markdown id="m">![j](pic.jpg)</Markdown>`) }));
   assert.equal(ok.isError, false, ok.content[0].text);
   assert.match(ok.content[0].text, /Note:\n- <Svg id="d"> removed onclick/);
   const v = h.view("a1")!;
@@ -276,15 +276,15 @@ test("canvas_set and canvas_patch take pictures from the agent's workspace and r
   assert.ok(JSON.stringify(v).length < 5_000);
   // a patch that points at a file outside the workspace changes nothing
   const before = h.source("a1");
-  const bad = tool(h, token, "canvas_patch", { ops: [{ id: "i", set: { src: "../outside.png" } }] });
+  const bad = (await tool(h, token, "canvas_patch", { ops: [{ id: "i", set: { src: "../outside.png" } }] }));
   assert.equal(bad.isError, true);
   assert.match(bad.content[0].text, /<Image id="i">.*(outside|no such file)/);
   assert.equal(h.source("a1"), before);
-  assert.equal(tool(h, token, "canvas_patch", { ops: [{ id: "i", set: { src: "pic.webp" } }] }).isError, false);
-  assert.equal(tool(h, token, "canvas_patch", { ops: [{ id: "d", text: `<svg viewBox="0 0 10 10"><script>x</script></svg>` }] }).isError, false); // script is removed, not fatal
-  assert.equal(tool(h, token, "canvas_patch", { ops: [{ id: "d", text: "<svg>no viewBox</svg>" }] }).isError, true);
+  assert.equal((await tool(h, token, "canvas_patch", { ops: [{ id: "i", set: { src: "pic.webp" } }] })).isError, false);
+  assert.equal((await tool(h, token, "canvas_patch", { ops: [{ id: "d", text: `<svg viewBox="0 0 10 10"><script>x</script></svg>` }] })).isError, false); // script is removed, not fatal
+  assert.equal((await tool(h, token, "canvas_patch", { ops: [{ id: "d", text: "<svg>no viewBox</svg>" }] })).isError, true);
   const noCwd = newHub();
   const t2 = noCwd.mintToken("");
   noCwd.bind(t2, "a2");
-  assert.match(tool(noCwd, t2, "canvas_set", { source: canvas('<Image src="pic.png"/>') }).content[0].text, /workspace is not known/);
+  assert.match((await tool(noCwd, t2, "canvas_set", { source: canvas('<Image src="pic.png"/>') })).content[0].text, /workspace is not known/);
 });

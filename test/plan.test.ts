@@ -30,7 +30,7 @@ export const viewOf = (tree = showcaseTree(), o: Partial<CanvasView> = {}): Canv
 
 test("a canvas plans to one entry per block, with runs of metrics merged", () => {
   const plans = planBlocks(showcaseTree());
-  assert.deepEqual(plans.map((p) => p.kind), ["bluf", "steps", "progress", "metrics", "decision", "ask", "diff", "chart", "svg", "image", "markdown", "markdown", "markdown", "markdown", "markdown", "grid"]);
+  assert.deepEqual(plans.map((p) => p.kind), ["bluf", "steps", "progress", "metrics", "decision", "ask", "diff", "svg", "svg", "image", "markdown", "markdown", "markdown", "markdown", "markdown", "grid"]);
   assert.equal(plans.find((p) => p.kind === "metrics" && p.items.length === 3) !== undefined, true);
 });
 

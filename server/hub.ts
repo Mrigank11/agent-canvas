@@ -284,6 +284,17 @@ export class Hub {
 
   // ---------- what the agent writes ----------
 
+  /**
+   * The slow half of canvas_set/canvas_patch (laying out diagrams and charts), run before the synchronous `set`/`patch`.
+   * Anything that would fail there anyway (off, unparseable, no canvas) is left for them to report.
+   */
+  async prepare(agentId: string, change: { source: string } | { ops: PatchOp[] }): Promise<{ ok: true; notes: string[] } | { ok: false; errors: string[] }> {
+    let root: Node | null = null;
+    if ("source" in change) { const r = parseCanvas(change.source); if (r.ok) root = r.root; }
+    else { const cur = this.authored.get(agentId); const r = cur && change.ops.length ? patchCanvas(cur.source, change.ops) : null; if (r?.ok) root = r.root; }
+    return root ? this.assets.prepare(root) : { ok: true, notes: [] };
+  }
+
   /** canvas_set: replace the canvas. */
   set(agentId: string, source: string): { ok: true; ids: string[]; notes: string[] } | { ok: false; errors: string[] } {
     if (!this.resolved(agentId).tools) return { ok: false, errors: ["the canvas is off for this agent (if it was only just created with canvas=on, wait a few seconds and retry)"] };

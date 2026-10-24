@@ -124,7 +124,6 @@ test("for the showcase canvas, the HTML agrees with the plan on signal, glyph an
   assert.equal((html.match(/class="best"/g) ?? []).length + (html.match(/num best/g) ?? []).length, table.rows.flat().filter((c) => c.best).length);
   for (const n of md) if (n.k === "alert") { has(html, `note ${n.signal}`); has(html, n.glyph); }
   has(html, "Decision · Runtime"); has(html, "✓ Node");
-  has(html, "<svg"); // a line chart draws a real line in the browser
 });
 
 test("the status line agrees: same label, signal, lead and flags as the plan", () => {
