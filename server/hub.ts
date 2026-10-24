@@ -7,6 +7,7 @@ import { autoCanvas, type AutoItem } from "../shared/auto.ts";
 import { findNode, parseCanvas, patchCanvas, serialize, walk, type Node, type PatchOp } from "../shared/canvas.ts";
 import { REANCHOR_AFTER, ROW_ID, ROW_KIND, ROW_VERSION, type CanvasView } from "../shared/contract.ts";
 import type { RunState } from "../shared/honesty.ts";
+import { LABEL_KEY, firstOverride, parseOverride, resolveCanvas, type CanvasPolicy, type Override, type Resolved } from "../shared/config.ts";
 
 type PaseoApi = PluginHandlerContext["paseo"];
 type Handle = ReturnType<PaseoApi["agents"]["ref"]>;
@@ -18,7 +19,11 @@ type Authored = { source: Node; updatedAt: number; callsAtUpdate: number };
 /** What Paseo says. */
 type Live = { title: string | null; workspaceId: string | null; runState: RunState; callIds: Set<string>; items: AutoItem[]; currentTool: string | null; lastActivityAt: number; seq: number };
 
-export type HubOptions = { log: (m: string) => void; stateFile: string | null; publicBase: string; localBase: string; agentLink?: (agentId: string) => string | null; now?: () => number };
+export type HubOptions = { log: (m: string) => void; stateFile: string | null; publicBase: string; localBase: string; agentLink?: (agentId: string) => string | null;
+  /** The current host-wide settings. */
+  policy?: () => CanvasPolicy;
+  /** The message that teaches an agent without the tools to use the HTTP endpoint. */
+  recipe?: (agentId: string) => string; now?: () => number };
 
 const isRunState = (s: string): s is RunState => ["initializing", "idle", "running", "error", "closed"].includes(s);
 
@@ -71,6 +76,14 @@ export class Hub {
   private now: () => number;
 
   private o: HubOptions;
+  /** Per-agent overrides by where they came from. The latest explicit one wins: runtime (the pill), then env at creation, then label. */
+  private ovRuntime = new Map<string, Override>();
+  private ovEnv = new Map<string, Override>();
+  private ovLabel = new Map<string, Override>();
+  private recipeSent = new Set<string>();
+  /** Agents whose first turn has started (the recipe must not overtake the initial prompt), and those still waiting for one. */
+  private started = new Set<string>();
+  private recipeWanted = new Set<string>();
   /** Canvases read back from disk at start-up: dropped if their agent turns out to be gone. */
   private restored = new Set<string>();
   /** Agents archived this session: late hooks (closed, turn_ended) must not bring them back. */
@@ -107,7 +120,7 @@ export class Hub {
     try {
       mkdirSync(dirname(this.o.stateFile), { recursive: true });
       const tmp = `${this.o.stateFile}.tmp`;
-      writeFileSync(tmp, JSON.stringify({ authored: [...this.authored], tokens: [...this.tokens] }));
+      writeFileSync(tmp, JSON.stringify({ authored: [...this.authored], tokens: [...this.tokens], ovRuntime: [...this.ovRuntime], ovEnv: [...this.ovEnv], ovLabel: [...this.ovLabel], recipeSent: [...this.recipeSent] }));
       renameSync(tmp, this.o.stateFile);
     } catch (e) { this.o.log(`persist failed: ${(e as Error).message}`); }
   }
@@ -118,6 +131,10 @@ export class Hub {
       this.authored = new Map(s.authored);
       this.restored = new Set(this.authored.keys());
       this.tokens = new Map(s.tokens);
+      this.ovRuntime = new Map(s.ovRuntime ?? []);
+      this.ovEnv = new Map(s.ovEnv ?? []);
+      this.ovLabel = new Map(s.ovLabel ?? []);
+      this.recipeSent = new Set(s.recipeSent ?? []);
     } catch {}
   }
 
@@ -150,10 +167,62 @@ export class Hub {
     return null;
   }
 
+  // ---------- who gets a canvas: override > global switch > default ----------
+
+  policy(): CanvasPolicy { return this.o.policy?.() ?? { defaultOn: false, autoCanvas: true }; }
+  override(agentId: string): Override | null { return firstOverride(this.ovRuntime.get(agentId), this.ovEnv.get(agentId), this.ovLabel.get(agentId)); }
+  resolved(agentId: string): Resolved { return resolveCanvas(this.override(agentId), this.policy()); }
+
+  /** Record where an override came from. `null` clears a runtime override only. */
+  setOverride(agentId: string, value: Override | null, source: "runtime" | "env" | "label") {
+    const map = source === "runtime" ? this.ovRuntime : source === "env" ? this.ovEnv : this.ovLabel;
+    if (value) map.set(agentId, value); else map.delete(agentId);
+    this.persist();
+    this.changed(agentId);
+    void this.ensureTools(agentId, source === "runtime");
+  }
+
+  /** The agent began a turn: a recipe that was waiting for the initial prompt can go now. */
+  turnStarted(agentId: string) {
+    this.started.add(agentId);
+    if (this.recipeWanted.delete(agentId)) void this.ensureTools(agentId, true);
+  }
+
+  /** An agent that should have the canvas but was not given the MCP tools gets the plain-HTTP recipe, once. */
+  async ensureTools(agentId: string, now = true) {
+    if (!this.api || !this.o.recipe || this.recipeSent.has(agentId)) return;
+    if (this.override(agentId) !== "on" || this.tokenFor(agentId) || this.authored.has(agentId)) return;
+    // Sent straight away for a runtime choice; for a label, after the first turn has started so the initial prompt goes first.
+    if (!now && !this.started.has(agentId)) { this.recipeWanted.add(agentId); return; }
+    this.recipeSent.add(agentId);
+    this.persist();
+    try { await this.send(agentId, this.o.recipe(agentId)); } catch (e) { this.recipeSent.delete(agentId); this.o.log(`recipe to ${agentId} failed: ${(e as Error).message}`); }
+  }
+
+  /** Read the agent's labels from Paseo (the only place a label override is visible: not in the create hook). */
+  async learnLabels(agentId: string) {
+    if (!this.api) return;
+    try {
+      const h = this.api.agents.ref(agentId);
+      const a = h.current() ?? (await h.refresh())?.agent ?? null;
+      const o = parseOverride(a?.labels?.[LABEL_KEY]);
+      if (o !== (this.ovLabel.get(agentId) ?? null)) this.setOverride(agentId, o, "label");
+    } catch (e) { this.o.log(`labels of ${agentId}: ${(e as Error).message}`); }
+  }
+
+  stateOf(agentId: string): { override: Override | null; tools: boolean; show: boolean } {
+    const r = this.resolved(agentId);
+    return { override: this.override(agentId), tools: r.tools, show: r.show };
+  }
+
+  /** Settings changed: every row and view is re-derived. */
+  policyChanged() { for (const id of this.agents()) this.changed(id); }
+
   // ---------- what the agent writes ----------
 
   /** canvas_set: replace the canvas. */
   set(agentId: string, source: string): { ok: true; ids: string[] } | { ok: false; errors: string[] } {
+    if (!this.resolved(agentId).tools) return { ok: false, errors: ["the canvas is off for this agent"] };
     const r = parseCanvas(source);
     if (!r.ok) return { ok: false, errors: r.errors.map((e) => `${e.line ? `line ${e.line}: ` : ""}${e.message}`) };
     this.authored.set(agentId, { source: r.root, updatedAt: this.now(), callsAtUpdate: this.callCount(agentId) });
@@ -164,6 +233,7 @@ export class Hub {
   }
   /** canvas_patch: atomic. */
   patch(agentId: string, ops: PatchOp[]): { ok: true } | { ok: false; errors: string[] } {
+    if (!this.resolved(agentId).tools) return { ok: false, errors: ["the canvas is off for this agent"] };
     const cur = this.authored.get(agentId);
     if (!cur) return { ok: false, errors: ["there is no canvas yet: call canvas_set first"] };
     const r = patchCanvas(cur.source, ops);
@@ -217,7 +287,7 @@ export class Hub {
     try {
       const r = await this.api!.agents.list({ page: { limit: 100 } });
       const alive = new Set<string>();
-      for (const { agent } of r.entries) if (!agent.archivedAt) { alive.add(agent.id); const l0 = this.liveFor(agent.id); l0.title = agent.title; l0.workspaceId = agent.workspaceId ?? null; await this.refresh(agent.id); }
+      for (const { agent } of r.entries) if (!agent.archivedAt) { alive.add(agent.id); const l0 = this.liveFor(agent.id); l0.title = agent.title; l0.workspaceId = agent.workspaceId ?? null; const lo = parseOverride(agent.labels?.[LABEL_KEY]); if (lo) this.ovLabel.set(agent.id, lo); await this.refresh(agent.id); }
       // a canvas restored from disk for an agent that is archived or gone does not belong on the board
       for (const id of this.restored) if (!alive.has(id)) this.authored.delete(id);
       this.restored.clear();
@@ -281,6 +351,8 @@ export class Hub {
     const live = this.live.get(agentId);
     const a = this.authored.get(agentId);
     if (!live && !a) return null;
+    const res = this.resolved(agentId);
+    if (!res.show || (!a && !res.auto)) return null;
     const l = live ?? this.liveFor(agentId);
     const tree = a?.source ?? autoCanvas(l.title, l.items, l.runState === "running");
     return {
@@ -310,7 +382,16 @@ export class Hub {
 
   private async publish(agentId: string) {
     const v = this.view(agentId);
-    if (!v || !this.api) return;
+    if (!this.api) return;
+    if (!v) {
+      // The canvas was switched off for this agent: blank the card it already has in the pane.
+      const a = this.anchor.get(agentId);
+      if (a && this.lastRow.has(agentId)) {
+        this.lastRow.delete(agentId);
+        try { await this.api.agents.ref(agentId).timeline.append({ type: "plugin", id: `${ROW_ID}-${a.n}`, kind: ROW_KIND, version: ROW_VERSION, data: { superseded: true } }); } catch { /* best effort */ }
+      }
+      return;
+    }
     // The row carries no clock: only real changes are written, so an idle agent costs nothing.
     // (lastActivityAt is left out: appending the row itself is activity, which would republish forever)
     const sig = JSON.stringify({ ...v, lastActivityAt: 0 });

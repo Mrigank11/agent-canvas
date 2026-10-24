@@ -12,7 +12,7 @@ test("deep link into the Paseo web UI uses the daemon's server id", () => {
 
 test("the browser canvas links back to its agent, and omits the link when there is none", () => {
   const mk = (agentLink?: (id: string) => string | null) => {
-    const h = new Hub({ log: () => {}, stateFile: null, publicBase: "http://c", localBase: "http://l", agentLink });
+    const h = new Hub({ log: () => {}, stateFile: null, publicBase: "http://c", localBase: "http://l", agentLink, policy: () => ({ defaultOn: true, autoCanvas: true }) });
     h.set("a1", `<Canvas title="T"><Bluf>x</Bluf></Canvas>`);
     return renderCanvas(h.view("a1")!, Date.now());
   };

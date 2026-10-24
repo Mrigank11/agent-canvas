@@ -2,12 +2,14 @@ import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { SidePanelBody, LIST_SCREEN, ListItem, ListScreen } from "./client/screens";
 import { CanvasProvider } from "./client/common";
 import { contributePills } from "./client/pill";
+import { CanvasSettings } from "./client/settings";
 import { CanvasRow } from "./client/timeline";
 import { ROW_KIND, ROW_VERSION, rowData } from "./shared/contract";
 
 export default function contribute(client: PluginClientContext) {
   const cleanups = [
     client.addScreen({ id: LIST_SCREEN, title: "Canvases", Component: ListScreen }),
+    client.addSettingsScreen({ id: "settings", title: "Agent canvas", icon: "LayoutDashboard", Component: CanvasSettings }),
     client.addSidebarHeaderItem({ id: "canvases", title: "Canvases", Component: ListItem }),
     client.addWorkspacePanel({
       id: "canvas",

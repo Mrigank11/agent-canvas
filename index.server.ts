@@ -2,7 +2,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { answerRpc, enableRpc, getRpc, listRpc } from "./shared/contract.ts";
+import { answerRpc, getRpc, listRpc, overrideRpc } from "./shared/contract.ts";
+import { DEFAULT_POLICY, ENV_KEY, canvasSettings, parseOverride, type CanvasPolicy } from "./shared/config.ts";
 import { Hub } from "./server/hub.ts";
 import { agentDeepLink } from "./shared/links.ts";
 import { startHttp } from "./server/http.ts";
@@ -13,7 +14,6 @@ const BIND = process.env.AGENT_CANVAS_BIND ?? "0.0.0.0";
 const PUBLIC = (process.env.AGENT_CANVAS_PUBLIC_URL ?? `http://manjaro.tail2e75.ts.net:${PORT}`).replace(/\/$/, "");
 const APP = (process.env.AGENT_CANVAS_APP_URL ?? "http://manjaro.tail2e75.ts.net:6781").replace(/\/$/, "");
 const LOCAL = `http://127.0.0.1:${PORT}`;
-const OPT_IN = "AGENT_CANVAS";
 const KEY = "AGENT_CANVAS_KEY";
 
 function detectHome(): string {
@@ -39,15 +39,36 @@ Errors come back as JSON; fix them and retry.\n\n${VOCAB_DOC}`;
 export default function contribute(server: PluginServerContext) {
   const log = (m: string) => console.log(`[agent-canvas] ${m}`);
   const home = detectHome();
-  const hub = new Hub({ log, stateFile: join(home, "agent-canvas", "state.json"), publicBase: PUBLIC, localBase: LOCAL, agentLink: (id) => agentDeepLink(APP, serverId(home), id) });
+  // Host-wide defaults (Settings > Plugins > Agent canvas). Kept in memory; every change re-derives the views.
+  let policy: CanvasPolicy = DEFAULT_POLICY;
+  const hub = new Hub({
+    log,
+    stateFile: join(home, "agent-canvas", "state.json"),
+    publicBase: PUBLIC,
+    localBase: LOCAL,
+    agentLink: (id) => agentDeepLink(APP, serverId(home), id),
+    policy: () => policy,
+    recipe: (id) => INSTRUCTIONS(`${LOCAL}/api/canvas/${id}`),
+  });
+  const settings = server.registerSettings(canvasSettings);
+  const applySettings = (st: Awaited<ReturnType<typeof settings.read>>) => {
+    if (st.status !== "ready") { log(`settings invalid (${st.error}); using defaults`); policy = DEFAULT_POLICY; }
+    else policy = { defaultOn: st.values.defaultOn, autoCanvas: st.values.autoCanvas };
+    log(`policy: tools for all agents ${policy.defaultOn ? "ON" : "off"}, auto canvas ${policy.autoCanvas ? "on" : "OFF"}`);
+    hub.policyChanged();
+  };
+  void settings.read().then(applySettings).catch((e) => log(`settings read failed: ${e?.message ?? e}`));
+  const unsubSettings = settings.subscribe(applySettings);
   log(`starting (pid ${process.pid}, daemon home ${home})`);
   let http: Awaited<ReturnType<typeof startHttp>> | null = null;
   startHttp(hub, PORT, BIND, log).then((s) => (http = s)).catch((e) => log(`http failed: ${e?.message ?? e}`));
 
-  // Opt-in at creation: AGENT_CANVAS=on in the agent's environment gives it the canvas tools.
+  // The canvas tools are injected at creation for agents with AGENT_CANVAS=on, or for every agent when the global switch is on
+  // (AGENT_CANVAS=off keeps them out). The hook cannot see labels, so a label override is handled after creation.
   server.before("agent.create", ({ request }, ctx) => {
     hub.capture(ctx, "before agent.create");
-    if (request.env?.[OPT_IN] !== "on") return;
+    const ov = parseOverride(request.env?.[ENV_KEY]);
+    if (!(ov === "on" || (ov === null && policy.defaultOn))) return;
     const token = hub.mintToken(request.config.cwd ?? "");
     return {
       ...request,
@@ -64,16 +85,20 @@ export default function contribute(server: PluginServerContext) {
     hub.capture(ctx, "before agent.session_open");
     const token = request.env?.[KEY];
     if (token) hub.bind(token, request.agentId);
+    const ov = parseOverride(request.env?.[ENV_KEY]);
+    if (ov) hub.setOverride(request.agentId, ov, "env");
   });
 
   server.on("agent.created", (e, ctx) => {
     hub.capture(ctx, "agent.created");
     hub.bindByCwd(e.agent.id, e.agent.cwd);
     hub.noteAgent(e.agent.id, e.agent.title, e.agent.workspaceId);
+    void hub.learnLabels(e.agent.id); // a canvas=on|off label is only visible once the agent exists
   });
   for (const name of ["agent.turn_started", "agent.turn_ended", "agent.permission_requested", "agent.permission_resolved"] as const) {
     server.on(name, (e, ctx) => {
       hub.capture(ctx, name);
+      if (name === "agent.turn_started") hub.turnStarted(e.agent.id);
       hub.noteAgent(e.agent.id, e.agent.title, e.agent.workspaceId);
     });
   }
@@ -91,26 +116,22 @@ export default function contribute(server: PluginServerContext) {
   });
   server.handle(getRpc, (i, ctx) => {
     hub.capture(ctx, "rpc get");
-    return { view: hub.view(i.agentId) };
+    return { view: hub.view(i.agentId), state: hub.stateOf(i.agentId) };
   });
   server.handle(answerRpc, async (i, ctx) => {
     hub.capture(ctx, "rpc answer");
     return hub.answer(i.agentId, i.askId, i.value);
   });
-  // The pill's "turn it on" for an agent that was created without the tools: hand it the plain-HTTP recipe.
-  server.handle(enableRpc, async (i, ctx) => {
-    hub.capture(ctx, "rpc enable");
-    const url = `${LOCAL}/api/canvas/${i.agentId}`;
-    try {
-      await hub.send(i.agentId, INSTRUCTIONS(url));
-      return { ok: true, url: `${PUBLIC}/a/${i.agentId}` };
-    } catch (e) {
-      return { ok: false, url: `${PUBLIC}/a/${i.agentId}`, error: (e as Error).message };
-    }
+  // The pill's runtime override. "on" for an agent without the tools also sends it the plain-HTTP recipe, once.
+  server.handle(overrideRpc, (i, ctx) => {
+    hub.capture(ctx, "rpc override");
+    hub.setOverride(i.agentId, i.value === "default" ? null : i.value, "runtime");
+    return { ok: true, state: hub.stateOf(i.agentId) };
   });
 
   return async () => {
     log("cleanup");
+    unsubSettings();
     hub.stop();
     http?.close();
     http?.closeAllConnections?.();

@@ -14,7 +14,8 @@ run() { # title promptfile canvas(on|off) [shared-dir]  (a shared dir puts agent
     local ws; ws=$(P workspace ls --json 2>/dev/null | python3 -c "import json,sys; print(next((w['workspaceId'] for w in json.load(sys.stdin) if w['cwd']=='$dir'),''))")
     [ -n "$ws" ] && wsarg=(--workspace "$ws")
   fi
-  local envarg=(); [ "$3" = on ] && envarg=(--env AGENT_CANVAS=on)
+  # per-agent override: env AGENT_CANVAS=on gives the agent the canvas tools; label canvas=on is the MCP-only route (tools by HTTP recipe)
+  local envarg=(); [ "$3" = on ] && envarg=(--env AGENT_CANVAS=on); [ "$3" = label ] && envarg=(--label canvas=on)
   P run --no-wait --quiet --provider claude --model "$MODEL" --mode bypassPermissions --title "$1" --cwd "$dir" "${wsarg[@]}" "${envarg[@]}" "$(cat "$HERE/$2")" >/dev/null
   echo "started: $1"
 }
@@ -28,6 +29,7 @@ case "${1:-all}" in
   overconfident) run "Migration (says it's done)" overconfident.md on;;
   silent) run "Indexing (forgot to update)" silent.md on;;
   showcase) run "Block showcase" showcase.md on side-by-side;;
+  labeled) run "Labelled agent (canvas=on)" labeled.md label;;
   plain) run "Plain worker (no canvas)" plain.md off side-by-side;;
   all)
     run "Ship build 1.0.10" deploy.md on
@@ -36,5 +38,5 @@ case "${1:-all}" in
     run "Indexing (forgot to update)" silent.md on
     run "Block showcase" showcase.md on side-by-side
     run "Plain worker (no canvas)" plain.md off side-by-side;;
-  *) echo "usage: start.sh [reset|all|deploy|decision|overconfident|silent|showcase|plain]" >&2; exit 2;;
+  *) echo "usage: start.sh [reset|all|labeled|deploy|decision|overconfident|silent|showcase|plain]" >&2; exit 2;;
 esac

@@ -8,3 +8,36 @@ A standalone Paseo plugin: any agent shows its work as a live canvas (whiteliste
 - `skill/agent-canvas/` the agent-facing skill
 - `demo/` demo agents and `start.sh`
 - `npm run typecheck`, `npm test`
+
+## Who gets a canvas (configuration)
+
+Precedence: **per-agent override, then the global switch, then the default.** One resolver, `shared/config.ts` (`resolveCanvas`), unit-tested for every combination.
+
+**Global switch** (Settings → Plugins → agent-canvas ⋯ → Agent canvas; stored at `<daemon home>/plugin-settings/agent-canvas/canvas.json`):
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `defaultOn` | off | Give every new agent the canvas tools (the MCP server is injected at creation). Off: only agents with the override get them. |
+| `autoCanvas` | on | Show a canvas built from the agent's timeline for agents that write none and have no override. Its own toggle. |
+
+Everything off means an agent with no override has no canvas of any kind: no tools, no pane card, not in the Canvases list or the browser view.
+
+**Per-agent override** (beats the global switch both ways; values `on`/`true`/`1`/`yes`, `off`/`false`/`0`/`no`):
+
+| How | When | What it gives |
+|---|---|---|
+| env `AGENT_CANVAS=on` (or `off`) | at creation: `paseo run --env AGENT_CANVAS=on`, SDK create with `env` | `on`: the real `canvas_set`/`canvas_patch` tools. `off`: no tools, no canvas, even if the global switch is on. |
+| label `canvas=on` (or `off`) | at creation, via `labels` | The only thing the MCP `create_agent` tool can set (it has no env). Nothing is visible in the create hook, so the plugin reads the label once the agent exists and, after its first turn starts, sends it the plain-HTTP (curl) recipe. `off` hides it. |
+| Canvas pill → Turn on / off for this agent | at runtime | Same as the label for `on` (recipe sent at once); wins over env and label until "Use the default". |
+
+The latest explicit source wins: pill, then env, then label.
+
+**What Phase 5 (first mate) calls** to enable the canvas for an agent it starts:
+
+```
+mcp__paseo__create_agent({
+  provider: "...", title: "...", initialPrompt: "...", workspaceId: "...",
+  labels: { "canvas": "on" }          // plus whatever fm.* labels it uses
+})
+```
+This gives the agent the HTTP recipe, not MCP tools; every provider with a shell can use it. If real tools are wanted, either turn the global `defaultOn` switch on (first-mate agents then get the MCP tools at creation), or create through the CLI/SDK with `AGENT_CANVAS=on` in the env.

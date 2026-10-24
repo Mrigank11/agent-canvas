@@ -40,14 +40,21 @@ export type CanvasView = z.output<typeof canvasView>;
 export const rowData = z.union([canvasView, z.object({ superseded: z.literal(true) })]);
 
 export const listRpc = defineRpc({ name: "canvas.list", input: z.object({}), output: z.object({ views: z.array(canvasView), baseUrl: z.string() }) });
-export const getRpc = defineRpc({ name: "canvas.get", input: z.object({ agentId: z.string() }), output: z.object({ view: canvasView.nullable() }) });
+export const stateSchema = z.object({
+  /** The effective per-agent override (runtime, then env, then label), if any. */
+  override: z.enum(["on", "off"]).nullable(),
+  tools: z.boolean(),
+  show: z.boolean(),
+});
+export const getRpc = defineRpc({ name: "canvas.get", input: z.object({ agentId: z.string() }), output: z.object({ view: canvasView.nullable(), state: stateSchema }) });
 export const answerRpc = defineRpc({
   name: "canvas.answer",
   input: z.object({ agentId: z.string(), askId: z.string(), value: z.string() }),
   output: z.object({ ok: z.boolean(), error: z.string().optional() }),
 });
-export const enableRpc = defineRpc({
-  name: "canvas.enable",
-  input: z.object({ agentId: z.string() }),
-  output: z.object({ ok: z.boolean(), url: z.string(), error: z.string().optional() }),
+/** The pill's runtime override: force the canvas on or off for one agent, or go back to the creation override and the global switch. */
+export const overrideRpc = defineRpc({
+  name: "canvas.override",
+  input: z.object({ agentId: z.string(), value: z.enum(["on", "off", "default"]) }),
+  output: z.object({ ok: z.boolean(), state: stateSchema }),
 });

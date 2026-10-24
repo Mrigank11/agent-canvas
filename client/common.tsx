@@ -18,10 +18,10 @@ export function useViews(): { views: CanvasView[]; loading: boolean; unavailable
   return { views: q.data?.views ?? [], loading: q.isPending, unavailable: q.isError && !q.data };
 }
 
-export function useView(agentId: string): { view: CanvasView | null; loading: boolean } {
+export function useView(agentId: string): { view: CanvasView | null; state: { override: "on" | "off" | null; tools: boolean; show: boolean } | null; loading: boolean } {
   const call = useRpc(getRpc);
   const q = useQuery({ queryKey: ["agent-canvas", "get", agentId], queryFn: () => call({ agentId }), refetchInterval: REFRESH_MS, retry: false });
-  return { view: q.data?.view ?? null, loading: q.isPending };
+  return { view: q.data?.view ?? null, state: q.data?.state ?? null, loading: q.isPending };
 }
 
 /** A clock so ages in the strip keep moving between server pushes. */

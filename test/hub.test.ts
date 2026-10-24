@@ -26,7 +26,7 @@ function fake(opts: { status?: string; items?: any[]; maxSeq?: number } = {}) {
   return { api, st };
 }
 const wait = (ms = 320) => new Promise((r) => setTimeout(r, ms));
-const hub = (extra = {}) => new Hub({ log: () => {}, stateFile: null, publicBase: "http://h:1", localBase: "http://127.0.0.1:1", ...extra });
+const hub = (extra = {}) => new Hub({ log: () => {}, stateFile: null, publicBase: "http://h:1", localBase: "http://127.0.0.1:1", policy: () => ({ defaultOn: true, autoCanvas: true }), ...extra });
 const CANVAS = `<Canvas title="T" status="working"><Steps id="s"><Step id="a" state="active">a</Step></Steps><Ask id="q" question="Q?"><Option value="y">Yes</Option></Ask></Canvas>`;
 const tool = (h: Hub, key: string, name: string, args: unknown) => (handleRpc(h, key, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }) as any).result;
 

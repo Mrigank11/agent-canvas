@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { View } from "react-native";
 import { pillState } from "../shared/pill";
 import { planBlocks, statusPlan } from "../shared/plan";
-import { enableRpc, listRpc, type CanvasView } from "../shared/contract";
+import { listRpc, overrideRpc, type CanvasView } from "../shared/contract";
 import { Blocks } from "./blocks";
 import { CanvasProvider, openUrl, useNow, useView } from "./common";
 import { Button, Meta, ProgressTicks, StatusBadge, StatusDot, Txt } from "./ui/atoms";
@@ -25,21 +25,32 @@ function PillDot(props: PluginButtonIconProps) {
 
 /** The popover: a mini canvas. Header, the bottom line, steps, progress, metrics and the question: what a glance needs. */
 function MiniCanvas({ theme, agentId, close, openSide }: PluginButtonContentProps & { agentId: string; openSide: () => void }) {
-  const { view } = useView(agentId);
-  const enable = useRpc(enableRpc);
+  const { view, state } = useView(agentId);
+  const override = useRpc(overrideRpc);
   const list = useRpc(listRpc);
   const [msg, setMsg] = useState<string | null>(null);
   const now = useNow();
+  const set = (value: "on" | "off" | "default") => {
+    setMsg("Saving…");
+    override({ agentId, value }).then(() => setMsg(value === "on" ? "On: the agent is being told how to use it." : value === "off" ? "Off for this agent." : "Back to the default.")).catch((e) => setMsg(String(e)));
+  };
   return (
     <UiRoot theme={theme}>
       <View style={{ gap: 16, padding: 16, minWidth: 300, maxWidth: 380 }}>
-        {!view ? <Txt c="muted">Loading…</Txt> : <Inner view={view} now={now} agentId={agentId} />}
+        {!view ? (
+          <View style={{ gap: 8 }}>
+            <Txt role="lede" weight="600">Canvas is off for this agent</Txt>
+            <Txt c="muted">{state?.override === "off" ? "It was switched off for this agent." : "The global switch is off and this agent has no override."}</Txt>
+          </View>
+        ) : (
+          <Inner view={view} now={now} agentId={agentId} />
+        )}
         <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-          <Button variant="primary" label="Open side panel" onPress={() => { openSide(); close(); }} />
-          <Button variant="ghost" label="Browser ↗" onPress={() => { list({}).then((r) => openUrl(`${r.baseUrl}/a/${agentId}`)).catch(() => {}); close(); }} />
-          {view?.auto ? (
-            <Button variant="ghost" label="Ask this agent to write a canvas" onPress={() => { setMsg("Sending…"); enable({ agentId }).then((r) => setMsg(r.ok ? "Sent." : `Could not send: ${r.error}`)).catch((e) => setMsg(String(e))); }} />
-          ) : null}
+          {view ? <Button variant="primary" label="Open side panel" onPress={() => { openSide(); close(); }} /> : <Button variant="primary" label="Turn on for this agent" onPress={() => set("on")} />}
+          {view ? <Button variant="ghost" label="Browser ↗" onPress={() => { list({}).then((r) => openUrl(`${r.baseUrl}/a/${agentId}`)).catch(() => {}); close(); }} /> : null}
+          {view && state?.override !== "off" ? <Button variant="ghost" label="Turn off for this agent" onPress={() => set("off")} /> : null}
+          {view && state?.override ? <Button variant="ghost" label="Use the default" onPress={() => set("default")} /> : null}
+          {!view && state?.override ? <Button variant="ghost" label="Use the default" onPress={() => set("default")} /> : null}
         </View>
         {msg ? <Meta>{msg}</Meta> : null}
       </View>
