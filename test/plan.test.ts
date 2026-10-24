@@ -93,3 +93,11 @@ test("a row plan names the verdict, keeps the needs-you fill, and carries ticks"
   assert.equal(r.signal, "hot");
   assert.equal(r.label, "Needs you");
 });
+
+test("the status line never prints more than one line, whatever the view carries", () => {
+  const long = `Shell: cat > /tmp/c.tsx <<'EOF'\n${"line\n".repeat(40)}curl -s http://x`;
+  const p = statusPlan(viewOf(undefined, { currentTool: long }), 5000);
+  const run = p.facts.find((f) => f.signal === "run")!;
+  assert.doesNotMatch(run.text, /\n/);
+  assert.ok(run.text.length <= "running ".length + 80);
+});

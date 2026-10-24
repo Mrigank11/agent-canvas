@@ -7,7 +7,7 @@ import { DEFAULT_POLICY, ENV_KEY, canvasSettings, parseOverride, type CanvasPoli
 import { Hub } from "./server/hub.ts";
 import { agentDeepLink } from "./shared/links.ts";
 import { startHttp } from "./server/http.ts";
-import { VOCAB_DOC } from "./server/vocab-doc.ts";
+import { recipe } from "./server/recipe.ts";
 
 const PORT = Number(process.env.AGENT_CANVAS_PORT ?? 6790);
 const BIND = process.env.AGENT_CANVAS_BIND ?? "0.0.0.0";
@@ -30,12 +30,6 @@ function serverId(home: string): string | null {
   try { return readFileSync(join(home, "server-id"), "utf8").trim() || null; } catch { return null; }
 }
 
-const INSTRUCTIONS = (url: string) => `You have a live canvas the human watches instead of your chat. This session has no canvas tool, so use plain HTTP with curl:
-  set:   curl -s -X POST ${url} --data-binary @canvas.tsx
-  patch: curl -s -X POST ${url}/patch -H 'content-type: application/json' -d '[{"id":"build","set":{"state":"done"}}]'
-  read:  curl -s ${url}
-Errors come back as JSON; fix them and retry.\n\n${VOCAB_DOC}`;
-
 export default function contribute(server: PluginServerContext) {
   const log = (m: string) => console.log(`[agent-canvas] ${m}`);
   const home = detectHome();
@@ -48,7 +42,7 @@ export default function contribute(server: PluginServerContext) {
     localBase: LOCAL,
     agentLink: (id) => agentDeepLink(APP, serverId(home), id),
     policy: () => policy,
-    recipe: (id) => INSTRUCTIONS(`${LOCAL}/api/canvas/${id}`),
+    recipe: (id) => recipe(`${LOCAL}/api/canvas/${id}`),
   });
   const settings = server.registerSettings(canvasSettings);
   const applySettings = (st: Awaited<ReturnType<typeof settings.read>>) => {

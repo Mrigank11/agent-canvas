@@ -135,6 +135,13 @@ export const FLAG_GLYPH = { warn: "!", err: "✕" } as const;
 
 // ---------- formatting ----------
 
+/** One line of at most `max` characters: the first non-empty line, whitespace collapsed, an ellipsis when cut. */
+export function oneLine(s: string, max = 80): string {
+  const first = s.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+  const flat = first.replace(/\s+/g, " ");
+  return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
+}
+
 export function ago(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h`;

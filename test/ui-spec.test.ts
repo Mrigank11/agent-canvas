@@ -81,3 +81,12 @@ test("tables mark the best value only where the header says which way is better"
   assert.ok(isNumericColumn([["$25/mo"], ["1,200 ms"]], 0));
   assert.ok(!isNumericColumn([["abc"]], 0));
 });
+
+test("oneLine: first non-empty line, collapsed, cut with an ellipsis", async () => {
+  const { oneLine } = await import("../shared/ui-spec.ts");
+  assert.equal(oneLine("ls -la"), "ls -la");
+  assert.equal(oneLine("\n\n  cat > x <<'EOF'\nbody\nEOF"), "cat > x <<'EOF'");
+  assert.equal(oneLine("a    b\t c"), "a b c");
+  assert.equal(oneLine("x".repeat(200), 20), `${"x".repeat(19)}…`);
+  assert.equal(oneLine("", 10), "");
+});

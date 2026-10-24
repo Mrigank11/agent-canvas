@@ -41,3 +41,15 @@ mcp__paseo__create_agent({
 })
 ```
 This gives the agent the HTTP recipe, not MCP tools; every provider with a shell can use it. If real tools are wanted, either turn the global `defaultOn` switch on (first-mate agents then get the MCP tools at creation), or create through the CLI/SDK with `AGENT_CANVAS=on` in the env.
+
+### Label path timing, and how Phase 5 avoids waiting
+
+Labels are not visible to the plugin when an agent is created (the `agent.create` and `agent.session_open` hooks carry only the config and env; checked on 0.12). The plugin reads the label right after creation and, once the agent's first turn has started, sends it the curl recipe as a steering message. On a normal first turn this lands before the agent's first tool call (checked), but it is a message **after** the initial prompt, so a first turn that is only a few seconds long, or a provider that queues steering until the turn ends, can finish first and the recipe starts a second turn.
+
+To have the recipe from the very first token, put it in the brief. Every agent's shell has its own id in `$PASEO_AGENT_ID`, so one fixed snippet works for any agent:
+
+```
+node agent-canvas/server/brief-snippet.ts 6790      # prints the recipe with .../api/canvas/$PASEO_AGENT_ID
+```
+
+Paste its output under a "## Your canvas" heading in the crew brief and still set `labels: { canvas: "on" }`: the label turns the canvas on for that agent (the endpoint answers "off for this agent" until the label has been read, a few hundred milliseconds after creation, and the snippet tells the agent to retry), and the snippet removes the wait.

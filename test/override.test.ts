@@ -36,7 +36,7 @@ test("everything off: an agent with no override has no canvas, cannot write one,
   h.noteAgent("a1", "Plain");
   await wait(60);
   assert.equal(h.view("a1"), null);
-  assert.deepEqual(h.set("a1", CANVAS), { ok: false, errors: ["the canvas is off for this agent"] });
+  assert.deepEqual(h.set("a1", CANVAS), { ok: false, errors: ["the canvas is off for this agent (if it was only just created with canvas=on, wait a few seconds and retry)"] });
   assert.deepEqual(h.stateOf("a1"), { override: null, tools: false, show: false });
   h.stop();
 });
@@ -146,4 +146,103 @@ test("a turn that started before the label was read still gets the recipe", asyn
   await wait(60);
   assert.deepEqual(st.sent, ["RECIPE a1"]);
   h.stop();
+});
+
+// ---------- polling discipline and one-line tool labels ----------
+
+function counting(opts: { fail?: boolean; items?: unknown[] } = {}) {
+  const st = { refetch: 0, fail: !!opts.fail, items: opts.items ?? [], logs: [] as string[] };
+  const api: any = {
+    agents: {
+      list: async () => ({ entries: [] }),
+      ref: (id: string) => ({
+        send: async () => {},
+        current: () => ({ id, labels: {} }),
+        timeline: {
+          append: async () => ({}),
+          refetch: async () => {
+            st.refetch++;
+            if (st.fail) throw new Error("OpenCode 2.0.8 is too old");
+            return { agent: { id, status: "running", title: "A", updatedAt: new Date().toISOString() }, window: { maxSeq: 1 }, entries: st.items.map((item, i) => ({ item, seqStart: i })) };
+          },
+        },
+      }),
+    },
+  };
+  return { api, st };
+}
+const makeNow = (policy: CanvasPolicy, api: unknown, log: (m: string) => void, clock: { t: number }) => {
+  const h = new Hub({ log, stateFile: null, publicBase: "http://h", localBase: "http://l", policy: () => policy, now: () => clock.t });
+  h.capture({ paseo: api as never }, "test");
+  return h;
+};
+
+test("an agent with no canvas, no override and no auto canvas is never read", async () => {
+  const { api, st } = counting();
+  const h = makeNow({ defaultOn: false, autoCanvas: false }, api, () => {}, { t: 1000 });
+  for (let i = 0; i < 5; i++) h.noteAgent("a1", "Opencode agent", "w1");
+  await h.refresh("a1");
+  await (h as any).tick();
+  assert.equal(st.refetch, 0);
+  h.stop();
+});
+
+test("it starts reading as soon as the agent gets an override, and stops when it is switched off", async () => {
+  const { api, st } = counting();
+  const h = makeNow({ defaultOn: false, autoCanvas: false }, api, () => {}, { t: 1000 });
+  h.noteAgent("a1", "x");
+  h.setOverride("a1", "on", "env");
+  await wait(40);
+  assert.ok(st.refetch >= 1);
+  const before = st.refetch;
+  h.setOverride("a1", "off", "runtime");
+  await h.refresh("a1");
+  assert.equal(st.refetch, before);
+  h.stop();
+});
+
+test("a failing agent backs off and is logged once, not on every attempt", async () => {
+  const { api, st } = counting({ fail: true });
+  const logs: string[] = [];
+  const clock = { t: 1_000_000 };
+  const h = makeNow({ defaultOn: true, autoCanvas: true }, api, (m) => logs.push(m), clock);
+  h.noteAgent("a1", "Old opencode");
+  await wait(40);
+  const first = st.refetch;
+  for (let i = 0; i < 20; i++) await h.refresh("a1"); // hooks and ticks keep asking
+  assert.equal(st.refetch, first); // inside the backoff window: no call
+  assert.equal(logs.filter((l) => l.includes("failed")).length, 1);
+  clock.t += 31_000;
+  await h.refresh("a1");
+  assert.equal(st.refetch, first + 1); // retried after the window
+  await h.refresh("a1");
+  assert.equal(st.refetch, first + 1); // and the window doubled
+  assert.equal(logs.filter((l) => l.includes("failed")).length, 1);
+  st.fail = false;
+  clock.t += 3_600_000;
+  await h.refresh("a1");
+  assert.equal(h.view("a1")?.runState, "running"); // recovers
+  h.stop();
+});
+
+test("a 40-line shell command becomes one short line in the status", async () => {
+  const heredoc = `cat > /tmp/c.tsx <<'EOF'\n${"<Step>line</Step>\n".repeat(40)}EOF\ncurl -s -X POST http://127.0.0.1:6790/api/canvas/x --data-binary @/tmp/c.tsx`;
+  const { api } = counting({ items: [{ type: "tool_call", callId: "c1", name: "Bash", status: "running", detail: { type: "shell", command: heredoc } }] });
+  const h = makeNow({ defaultOn: true, autoCanvas: true }, api, () => {}, { t: 1000 });
+  h.noteAgent("a1", "x");
+  await wait(40);
+  const tool = h.view("a1")!.currentTool!;
+  assert.doesNotMatch(tool, /\n/);
+  assert.ok(tool.length <= 80, `${tool.length}`);
+  assert.match(tool, /^Shell: cat > \/tmp\/c\.tsx <<'EOF/);
+  assert.ok(tool.endsWith("…") || tool.length < 80);
+  h.stop();
+});
+
+import { briefSnippet, recipe } from "../server/recipe.ts";
+test("the brief snippet takes the agent id from its shell, so a brief can carry it from the first turn", () => {
+  const s = briefSnippet(6790);
+  assert.match(s, /http:\/\/127\.0\.0\.1:6790\/api\/canvas\/\$PASEO_AGENT_ID/);
+  assert.match(s, /<Canvas title=/); // the vocabulary is in it
+  assert.match(recipe("http://x/api/canvas/abc"), /curl -s -X POST http:\/\/x\/api\/canvas\/abc --data-binary/);
 });

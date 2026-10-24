@@ -5,7 +5,7 @@ import { chartPoints, type Node, type StepState } from "./canvas.ts";
 import { checkHonesty, summarize, type Verdict } from "./honesty.ts";
 import type { CanvasView } from "./contract.ts";
 import { pillState } from "./pill.ts";
-import { FLAG_GLYPH, NOTE_GLYPH, STEP_GLYPH, TONES, ago, bestCells, flagSignal, isNumericColumn, metricSignal, noteSignal, parseDelta, runSignal, signalFor, stepSignal, visibleFlags, type Delta, type Tone } from "./ui-spec.ts";
+import { FLAG_GLYPH, NOTE_GLYPH, oneLine, STEP_GLYPH, TONES, ago, bestCells, flagSignal, isNumericColumn, metricSignal, noteSignal, parseDelta, runSignal, signalFor, stepSignal, visibleFlags, type Delta, type Tone } from "./ui-spec.ts";
 
 export type StepPlan = { id: string; state: StepState; text: string; glyph: string; signal: Tone };
 export type MetricPlan = { id: string; label: string; head: string; valueSignal: Tone | null; delta: Delta | null };
@@ -110,7 +110,7 @@ export function statusPlan(view: Pick<CanvasView, "tree" | "runState" | "updated
   const verdict = checkHonesty(view.tree, { runState: run, canvasUpdatedAt: view.updatedAt, toolCallsSinceUpdate: calls, now });
   const asks = summarize(view.tree).openAsks;
   const facts: StatusPlan["facts"] = [];
-  if (view.currentTool) facts.push({ text: `running ${view.currentTool}`, signal: "run" });
+  if (view.currentTool) facts.push({ text: `running ${oneLine(view.currentTool)}`, signal: "run" });
   facts.push({ text: `active ${ago(now - view.lastActivityAt)} ago` });
   facts.push({ text: view.updatedAt == null ? "canvas never written (auto canvas)" : `canvas updated ${ago(now - view.updatedAt)} ago` });
   facts.push({ text: `${calls} tool call${calls === 1 ? "" : "s"} since` });

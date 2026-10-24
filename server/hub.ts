@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { autoCanvas, type AutoItem } from "../shared/auto.ts";
+import { oneLine } from "../shared/ui-spec.ts";
 import { findNode, parseCanvas, patchCanvas, serialize, walk, type Node, type PatchOp } from "../shared/canvas.ts";
 import { REANCHOR_AFTER, ROW_ID, ROW_KIND, ROW_VERSION, type CanvasView } from "../shared/contract.ts";
 import type { RunState } from "../shared/honesty.ts";
@@ -29,14 +30,15 @@ const isRunState = (s: string): s is RunState => ["initializing", "idle", "runni
 
 function toolLabel(c: Extract<Item, { type: "tool_call" }>): { label: string; file?: string } {
   const d = c.detail;
+  // a label is one short line: a shell command can be a 40-line heredoc
   switch (d.type) {
-    case "shell": return { label: `Shell: ${d.command}` };
-    case "read": return { label: `Read ${d.filePath}`, file: undefined };
-    case "edit": return { label: `Edit ${d.filePath}`, file: d.filePath };
-    case "write": return { label: `Write ${d.filePath}`, file: d.filePath };
-    case "search": return { label: `Search ${d.query}` };
-    case "fetch": return { label: `Fetch ${d.url}` };
-    default: return { label: c.name.replace(/^mcp__/, "").replace(/__/g, ":") };
+    case "shell": return { label: oneLine(`Shell: ${d.command}`) };
+    case "read": return { label: oneLine(`Read ${d.filePath}`), file: undefined };
+    case "edit": return { label: oneLine(`Edit ${d.filePath}`), file: d.filePath };
+    case "write": return { label: oneLine(`Write ${d.filePath}`), file: d.filePath };
+    case "search": return { label: oneLine(`Search ${d.query}`) };
+    case "fetch": return { label: oneLine(`Fetch ${d.url}`) };
+    default: return { label: oneLine(c.name.replace(/^mcp__/, "").replace(/__/g, ":")) };
   }
 }
 
@@ -73,6 +75,8 @@ export class Hub {
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private poller: ReturnType<typeof setInterval> | null = null;
   private busy = new Set<string>();
+  /** Failed refreshes back off per agent, and are logged once until one succeeds. */
+  private fails = new Map<string, { n: number; retryAt: number }>();
   private now: () => number;
 
   private o: HubOptions;
@@ -179,6 +183,7 @@ export class Hub {
     if (value) map.set(agentId, value); else map.delete(agentId);
     this.persist();
     this.changed(agentId);
+    if (this.resolved(agentId).show) void this.refresh(agentId);
     void this.ensureTools(agentId, source === "runtime");
   }
 
@@ -207,7 +212,7 @@ export class Hub {
       const a = h.current() ?? (await h.refresh())?.agent ?? null;
       const o = parseOverride(a?.labels?.[LABEL_KEY]);
       if (o !== (this.ovLabel.get(agentId) ?? null)) this.setOverride(agentId, o, "label");
-    } catch (e) { this.o.log(`labels of ${agentId}: ${(e as Error).message}`); }
+    } catch { /* an agent whose record cannot be read (a provider that is too old) is simply left alone */ }
   }
 
   stateOf(agentId: string): { override: Override | null; tools: boolean; show: boolean } {
@@ -216,13 +221,13 @@ export class Hub {
   }
 
   /** Settings changed: every row and view is re-derived. */
-  policyChanged() { for (const id of this.agents()) this.changed(id); }
+  policyChanged() { for (const id of this.agents()) { this.changed(id); if (this.resolved(id).show) void this.refresh(id); } }
 
   // ---------- what the agent writes ----------
 
   /** canvas_set: replace the canvas. */
   set(agentId: string, source: string): { ok: true; ids: string[] } | { ok: false; errors: string[] } {
-    if (!this.resolved(agentId).tools) return { ok: false, errors: ["the canvas is off for this agent"] };
+    if (!this.resolved(agentId).tools) return { ok: false, errors: ["the canvas is off for this agent (if it was only just created with canvas=on, wait a few seconds and retry)"] };
     const r = parseCanvas(source);
     if (!r.ok) return { ok: false, errors: r.errors.map((e) => `${e.line ? `line ${e.line}: ` : ""}${e.message}`) };
     this.authored.set(agentId, { source: r.root, updatedAt: this.now(), callsAtUpdate: this.callCount(agentId) });
@@ -233,7 +238,7 @@ export class Hub {
   }
   /** canvas_patch: atomic. */
   patch(agentId: string, ops: PatchOp[]): { ok: true } | { ok: false; errors: string[] } {
-    if (!this.resolved(agentId).tools) return { ok: false, errors: ["the canvas is off for this agent"] };
+    if (!this.resolved(agentId).tools) return { ok: false, errors: ["the canvas is off for this agent (if it was only just created with canvas=on, wait a few seconds and retry)"] };
     const cur = this.authored.get(agentId);
     if (!cur) return { ok: false, errors: ["there is no canvas yet: call canvas_set first"] };
     const r = patchCanvas(cur.source, ops);
@@ -287,7 +292,7 @@ export class Hub {
     try {
       const r = await this.api!.agents.list({ page: { limit: 100 } });
       const alive = new Set<string>();
-      for (const { agent } of r.entries) if (!agent.archivedAt) { alive.add(agent.id); const l0 = this.liveFor(agent.id); l0.title = agent.title; l0.workspaceId = agent.workspaceId ?? null; const lo = parseOverride(agent.labels?.[LABEL_KEY]); if (lo) this.ovLabel.set(agent.id, lo); await this.refresh(agent.id); }
+      for (const { agent } of r.entries) if (!agent.archivedAt) { alive.add(agent.id); const l0 = this.liveFor(agent.id); l0.title = agent.title; l0.workspaceId = agent.workspaceId ?? null; const lo = parseOverride(agent.labels?.[LABEL_KEY]); if (lo) this.ovLabel.set(agent.id, lo); if (this.resolved(agent.id).show) await this.refresh(agent.id); }
       // a canvas restored from disk for an agent that is archived or gone does not belong on the board
       for (const id of this.restored) if (!alive.has(id)) this.authored.delete(id);
       this.restored.clear();
@@ -299,7 +304,7 @@ export class Hub {
     const l = this.liveFor(agentId);
     if (title !== undefined) l.title = title;
     if (workspaceId) l.workspaceId = workspaceId;
-    void this.refresh(agentId);
+    if (this.resolved(agentId).show) void this.refresh(agentId);
   }
   /** Archived agents leave the board. */
   forget(agentId: string) {
@@ -313,6 +318,11 @@ export class Hub {
   /** Pull the timeline tail and the run state for one agent. */
   async refresh(agentId: string) {
     if (!this.api || this.busy.has(agentId)) return;
+    // Nothing is read for an agent that has no canvas, no override and no auto canvas: on a daemon where the
+    // canvas is off for most agents this keeps the plugin silent.
+    if (!this.resolved(agentId).show) return;
+    const f = this.fails.get(agentId);
+    if (f && this.now() < f.retryAt) return;
     this.busy.add(agentId);
     try {
       const page = await this.api.agents.ref(agentId).timeline.refetch({ direction: "tail", limit: 200, projection: "projected" });
@@ -328,15 +338,20 @@ export class Hub {
       l.items = toAutoItems(items);
       const running = [...l.items].reverse().find((i) => i.kind === "tool" && i.status === "running");
       l.currentTool = running?.kind === "tool" ? running.label : null;
+      this.fails.delete(agentId);
       this.changed(agentId);
     } catch (e) {
-      this.o.log(`refresh ${agentId} failed: ${(e as Error).message}`);
+      const n = (this.fails.get(agentId)?.n ?? 0) + 1;
+      // 30 s, 1 min, 2 min ... capped at 15 min; the log line appears for the first failure only
+      this.fails.set(agentId, { n, retryAt: this.now() + Math.min(30_000 * 2 ** (n - 1), 15 * 60_000) });
+      if (n === 1) this.o.log(`refresh ${agentId} failed (retrying with backoff, not logged again): ${(e as Error).message}`);
     } finally { this.busy.delete(agentId); }
   }
 
   private async tick() {
     for (const [id, l] of this.live) {
       // Running agents every tick; a recently-active or errored one a few more times so the final state lands.
+      if (!this.resolved(id).show) continue;
       if (l.runState === "running" || l.runState === "initializing" || this.now() - l.lastActivityAt < 15_000) await this.refresh(id);
     }
   }
