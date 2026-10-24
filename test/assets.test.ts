@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseCanvas } from "../shared/canvas.ts";
 import { planBlocks } from "../shared/plan.ts";
+import { assetFormat, assetKey } from "../shared/asset-format.ts";
+import { assetRpc } from "../shared/contract.ts";
 import { Hub } from "../server/hub.ts";
 import { handleRpc } from "../server/mcp.ts";
 import { Assets } from "../server/render/assets.ts";
@@ -287,4 +289,61 @@ test("canvas_set and canvas_patch take pictures from the agent's workspace and r
   const t2 = noCwd.mintToken("");
   noCwd.bind(t2, "a2");
   assert.match((await tool(noCwd, t2, "canvas_set", { source: canvas('<Image src="pic.png"/>') })).content[0].text, /workspace is not known/);
+});
+
+// ---------- the web / desktop branch: a drawing as sanitised SVG, a phone as PNG ----------
+
+const decodeSvg = (b64: string) => Buffer.from(b64, "base64").toString("utf8");
+
+test("web format: a drawing comes back as the rebuilt SVG, themed, never the agent's source", async () => {
+  const a = new Assets(null);
+  const hostile = `<svg viewBox="0 0 100 50" onload="alert(1)"><script>alert(2)</script><foreignObject><div>x</div></foreignObject><a href="javascript:alert(3)"><rect width="1" height="1"/></a><rect width="9" height="9" fill="currentColor" onclick="x()"/><text x="5" y="20">hi</text></svg>`;
+  const v = a.svg.validate(hostile, { cwd: null });
+  assert.ok(v.ok);
+  if (!v.ok) return;
+  const light = await a.asset(v.art.hash, "light", 600, "svg");
+  const dark = await a.asset(v.art.hash, "dark", 600, "svg");
+  assert.ok(light && dark);
+  assert.equal(light.mime, "image/svg+xml");
+  assert.deepEqual([light.w, light.h], [100, 50]);
+  const ls = decodeSvg(light.base64), ds = decodeSvg(dark.base64);
+  assert.match(ls, /^<svg [^>]*color="#/);
+  assert.notEqual(ls, ds, "the ink follows the theme");
+  assert.ok(ls.includes("hi") && ls.includes("<rect"));
+  for (const bad of [/<script/i, /foreignObject/i, /onload/i, /onclick/i, /javascript:/i, /alert/, /<a[ >]/, /href/i]) assert.ok(!bad.test(ls), `${bad} must not survive`);
+  // the vector is exactly the sanitiser's output plus the ink, nothing else
+  assert.equal(ls.replace(/ color="#[0-9a-fA-F]+"/, ""), a.inlineSvg(v.art.hash));
+});
+
+test("web format: only drawings are vectors; images and unknown hashes keep the PNG path", async () => {
+  const ws = workspace();
+  const a = new Assets(null);
+  const im = a.image.validate("pic.png", { cwd: ws });
+  assert.ok(im.ok);
+  if (!im.ok) return;
+  const r = await a.asset(im.art.hash, "light", 720, "svg");
+  assert.equal(r?.mime, "image/png");
+  assert.equal(await a.asset("0".repeat(32), "light", 720, "svg"), null);
+  const sv = a.svg.validate(SVG(), { cwd: null });
+  assert.ok(sv.ok);
+  if (!sv.ok) return;
+  assert.equal((await a.asset(sv.art.hash, "light", 600))?.mime, "image/png", "no format asked: today's PNG");
+  assert.equal((await a.asset(sv.art.hash, "light", 600, "png"))?.mime, "image/png");
+});
+
+test("the asset RPC takes an optional format and nothing else", () => {
+  const ok = assetRpc.input.safeParse({ hash: "a".repeat(32), theme: "dark", format: "svg" });
+  assert.ok(ok.success);
+  assert.ok(assetRpc.input.safeParse({ hash: "a".repeat(32), theme: "dark" }).success, "old clients omit it");
+  assert.ok(!assetRpc.input.safeParse({ hash: "a".repeat(32), theme: "dark", format: "html" }).success);
+});
+
+test("asset-format: only the web platform draws vectors, and a vector has no width bucket", () => {
+  assert.equal(assetFormat("web", true), "svg");
+  assert.equal(assetFormat("web", false), "png");
+  for (const os of ["ios", "android", "native", "windows"]) assert.equal(assetFormat(os, true), "png");
+  assert.equal(assetKey("h", true, 480, "svg"), assetKey("h", true, 960, "svg"));
+  assert.notEqual(assetKey("h", true, 480, "png"), assetKey("h", true, 960, "png"));
+  assert.notEqual(assetKey("h", true, 480, "svg"), assetKey("h", true, 480, "png"));
+  assert.notEqual(assetKey("h", true, 480, "svg"), assetKey("h", false, 480, "svg"));
 });

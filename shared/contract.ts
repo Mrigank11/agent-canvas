@@ -90,9 +90,11 @@ export const overrideRpc = defineRpc({
 /**
  * The picture behind a hash: a PNG (or the small original) as base64, for the native Image component. The timeline row
  * carries only hashes; this is how a phone gets the bytes, over the Paseo connection rather than the plugin's HTTP port.
+ * `format: "svg"` (web and desktop clients) asks for a drawing as its sanitised SVG instead; anything that is not a
+ * drawing, or is gone, still answers with the PNG/original, and `mime` says which one arrived.
  */
 export const assetRpc = defineRpc({
   name: "canvas.asset",
-  input: z.object({ hash: z.string().regex(/^[0-9a-f]{32}$/), theme: z.enum(["light", "dark"]), width: z.number().optional() }),
+  input: z.object({ hash: z.string().regex(/^[0-9a-f]{32}$/), theme: z.enum(["light", "dark"]), width: z.number().optional(), format: z.enum(["png", "svg"]).optional() }),
   output: z.object({ asset: z.object({ mime: z.string(), base64: z.string(), w: z.number(), h: z.number() }).nullable() }),
 });

@@ -119,7 +119,7 @@ export default function contribute(server: PluginServerContext) {
   // The picture behind a hash, for the native Image: a PNG (light or dark) or the small original, base64, over the Paseo connection.
   server.handle(assetRpc, async (i, ctx) => {
     hub.capture(ctx, "rpc asset");
-    try { return { asset: await hub.assets.asset(i.hash, i.theme, i.width ?? 0) }; } catch (e) { log(`asset ${i.hash} failed: ${(e as Error).message}`); return { asset: null }; }
+    try { return { asset: await hub.assets.asset(i.hash, i.theme, i.width ?? 0, i.format) }; } catch (e) { log(`asset ${i.hash} failed: ${(e as Error).message}`); return { asset: null }; }
   });
   // The pill's runtime override. "on" for an agent without the tools also sends it the plain-HTTP recipe, once.
   server.handle(overrideRpc, (i, ctx) => {

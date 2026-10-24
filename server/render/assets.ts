@@ -12,6 +12,8 @@ import { readWorkspaceImage, sniffImage, type Mime } from "./images.ts";
 import { renderDot } from "./dot.ts";
 import { clampWidth, rasterize, type Theme } from "./raster.ts";
 import { renderVega } from "./vega.ts";
+import { tokensFixed } from "../../shared/ui-spec.ts";
+import type { AssetFormat } from "../../shared/asset-format.ts";
 
 export const HASH_RE = /^[0-9a-f]{32}$/;
 const hashOf = (...parts: (string | Buffer)[]) => { const h = createHash("sha256"); for (const p of parts) { h.update(p); h.update("\0"); } return h.digest("hex").slice(0, 32); };
@@ -280,9 +282,24 @@ export class Assets {
   }
   inlineSvg(hash: string): string | null { return HASH_RE.test(hash) ? this.svg.inline(hash) : null; }
 
+  /**
+   * The web and desktop clients' form of a drawing: the sanitiser's rebuilt SVG as is (never the agent's source), with
+   * the theme's ink on the root so `currentColor` resolves inside an image, where the page's colour does not reach.
+   */
+  vector(hash: string, theme: Theme): { mime: string; base64: string; w: number; h: number } | null {
+    const e = this.stored(hash);
+    if (!e) return null;
+    const svg = e.svg.replace(/^<svg /, `<svg color="${tokensFixed(theme).fg}" `);
+    return { mime: "image/svg+xml", base64: Buffer.from(svg).toString("base64"), w: e.w, h: e.h };
+  }
+
   /** What the phone shows for a hash: a PNG (or the small original) as base64. */
-  async asset(hash: string, theme: Theme, width: number): Promise<{ mime: string; base64: string; w: number; h: number } | null> {
+  async asset(hash: string, theme: Theme, width: number, format: AssetFormat = "png"): Promise<{ mime: string; base64: string; w: number; h: number } | null> {
     if (!HASH_RE.test(hash)) return null;
+    if (format === "svg") {
+      const v = this.vector(hash, theme);
+      if (v) return v;
+    }
     if (!this.images.has(hash) && !this.stored(hash)) {
       // after a restart the in-memory entry is gone: images come back from the disk cache, drawings from the next wire()
       const f = this.file(hash);

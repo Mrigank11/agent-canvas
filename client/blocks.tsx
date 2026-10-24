@@ -5,6 +5,7 @@ import * as RN from "react-native";
 import { Pressable, Text, View, useWindowDimensions } from "react-native";
 import { planBlocks, type BlockPlan } from "../shared/plan";
 import { answerRpc, assetRpc } from "../shared/contract";
+import { assetFormat, assetKey, type AssetFormat } from "../shared/asset-format";
 import { GRID_GAP, SPACE, gridColumns } from "../shared/ui-spec";
 import { Bar, Button, Chip, DeltaChip, GlyphCircle, Hairline, Meta, Region, Section, SectionLabel, Sheet, StatusDot, StepRow, Txt, Well } from "./ui/atoms";
 import { ink, typeStyle, useT } from "./ui/tokens";
@@ -98,11 +99,11 @@ type Asset = { mime: string; base64: string; w: number; h: number };
 const assets = new Map<string, Promise<Asset | null>>();
 
 /** One request per hash, theme and width bucket for the life of the pane; a miss is retried next time. */
-function loadAsset(fetchAsset: (i: { hash: string; theme: "light" | "dark"; width: number }) => Promise<{ asset: Asset | null }>, hash: string, dark: boolean, width: number): Promise<Asset | null> {
-  const key = `${hash}:${dark ? "d" : "l"}:${width}`;
+function loadAsset(fetchAsset: (i: { hash: string; theme: "light" | "dark"; width: number; format: AssetFormat }) => Promise<{ asset: Asset | null }>, hash: string, dark: boolean, width: number, format: AssetFormat): Promise<Asset | null> {
+  const key = assetKey(hash, dark, width, format);
   let p = assets.get(key);
   if (!p) {
-    p = fetchAsset({ hash, theme: dark ? "dark" : "light", width }).then((r) => r.asset).catch(() => null);
+    p = fetchAsset({ hash, theme: dark ? "dark" : "light", width, format }).then((r) => r.asset).catch(() => null);
     assets.set(key, p);
     void p.then((v) => { if (!v) assets.delete(key); });
     if (assets.size > 40) assets.delete(assets.keys().next().value!);
@@ -113,22 +114,24 @@ function loadAsset(fetchAsset: (i: { hash: string; theme: "light" | "dark"; widt
 /**
  * A picture. `Image` is not part of what Paseo documents for plugin screens (only View, Text, Pressable, ScrollView,
  * TextInput), so it is read off the host module at render time: where it is missing, the alt text and a link to the
- * browser view stand in, instead of a crash.
+ * browser view stand in, instead of a crash. On web and desktop a drawing (`vector`) arrives as the sanitised SVG and is
+ * shown as an image from a data URI (nothing in it can run or touch the host page); phones get the server's PNG.
  */
-function AssetImage({ hash, w, h, alt, label }: { hash: string | null; w: number; h: number; alt: string; label: string }) {
+function AssetImage({ hash, w, h, alt, label, vector = false }: { hash: string | null; w: number; h: number; alt: string; label: string; vector?: boolean }) {
   const t = useT();
   const fetchAsset = useRpc(assetRpc);
   const pageUrl = useContext(PageUrl);
   const { width } = useWindowDimensions();
   const px = Math.min(1440, Math.max(240, Math.ceil((width * 2) / 120) * 120));
   const HostImage = (RN as { Image?: typeof RN.Image }).Image;
+  const format = assetFormat((RN as { Platform?: { OS?: string } }).Platform?.OS ?? "native", vector);
   const [res, setRes] = useState<Asset | null | undefined>(undefined);
   useEffect(() => {
     let live = true;
     setRes(undefined);
-    if (hash && HostImage) void loadAsset(fetchAsset, hash, t.dark, px).then((v) => { if (live) setRes(v); });
+    if (hash && HostImage) void loadAsset(fetchAsset, hash, t.dark, px, format).then((v) => { if (live) setRes(v); });
     return () => { live = false; };
-  }, [hash, t.dark, px, !!HostImage]);
+  }, [hash, t.dark, px, format, !!HostImage]);
   if (!hash || !HostImage || res === null) {
     return (
       <View style={{ backgroundColor: t.well, borderRadius: 8, padding: 12, gap: 4 }}>
@@ -292,7 +295,7 @@ export function BlockView({ plan, agentId, askVariant, dense }: { plan: BlockPla
     case "ask": return <AskPanel plan={plan} agentId={agentId} variant={askVariant} />;
     case "diff": return <Diff plan={plan} />;
     case "markdown": return <View style={{ gap: 8 }}>{plan.blocks.map((b, i) => <MdBlockView key={i} b={b} />)}</View>;
-    case "svg": return <AssetImage hash={plan.hash} w={plan.w} h={plan.h} alt={plan.alt} label="Drawing" />;
+    case "svg": return <AssetImage hash={plan.hash} w={plan.w} h={plan.h} alt={plan.alt} label="Drawing" vector />;
     case "image": return <AssetImage hash={plan.hash} w={plan.w} h={plan.h} alt={plan.alt} label="Image" />;
     case "grid": return <GridView plan={plan} agentId={agentId} askVariant={askVariant} dense={dense} />;
     case "collapse": return <CollapseView plan={plan} agentId={agentId} askVariant={askVariant} dense={dense} />;
