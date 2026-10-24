@@ -1,13 +1,35 @@
-# agent-canvas (prototype)
+# agent-canvas
 
-A standalone Paseo plugin: any agent shows its work as a live canvas (whitelisted components, parsed not executed, patched by id), drawn natively in the agent pane and as HTML in a browser, with a Paseo-owned honesty strip. Self-contained so it can move to its own repo.
+A standalone Paseo plugin: any agent shows its work as a live canvas instead of the chat transcript. The agent writes it in a whitelisted, TSX-like vocabulary (steps, progress, metrics, questions with buttons, diffs, charts, tables). It is parsed, never executed, and patched by element id. It draws natively in the agent's pane, in an Explorer side panel, in a Canvases screen, and as HTML in a browser. A Paseo-owned status line, which the agent cannot write into, flags canvases that say "done" while the agent is still running, stale canvases and errors.
 
-- `shared/` vocabulary, parser, validator, patching, honesty cross-checks, auto canvas (pure, tested)
-- `server/` hub (state, Paseo facts, pane row), MCP + HTTP server, HTML renderer
-- `client/` React Native renderer, screen, panel, composer pill
-- `skill/agent-canvas/` the agent-facing skill
-- `demo/` demo agents and `start.sh`
-- `npm run typecheck`, `npm test`
+Status: prototype, running on Paseo 0.12 (`requirements.paseo: >=0.12.0 <0.13.0`). Extracted from the paseo-firstmate repo with its history.
+
+## Develop and test
+
+```
+npm install        # dev dependencies for typechecking and tests only; Paseo supplies the runtime modules
+npm run typecheck
+npm test           # node --test, no network, no daemon needed
+```
+
+## Install into a Paseo daemon
+
+```
+paseo plugin install /absolute/path/to/agent-canvas        # add --host <url> or --home <dir> to target a daemon
+paseo plugin ls
+```
+Plugins are trusted code; read `OVERVIEW.md` for what it does and where it listens (port 6790, `AGENT_CANVAS_PORT`; set `AGENT_CANVAS_PUBLIC_URL` and `AGENT_CANVAS_APP_URL` to the host name clients should use, the defaults point at one specific tailnet host).
+
+## Demo
+
+`demo/start.sh` starts six small demo agents against an isolated daemon (`CANVAS_DEMO_HOME`, default `~/.paseo-canvas-demo`; it refuses to run against `~/.paseo`). See `DEMO.md`.
+
+## Layout
+
+- `shared/` vocabulary, parser, validator, patching, honesty checks, render plan, UI tokens and rules (pure, tested)
+- `server/` hub (state and Paseo facts), MCP and HTTP server, HTML renderer
+- `client/` React Native renderer, screens, side panel, pill, settings
+- `skill/agent-canvas/` the agent-facing skill; `demo/` demo agents; `test/` unit tests
 
 ## Who gets a canvas (configuration)
 
@@ -49,7 +71,7 @@ Labels are not visible to the plugin when an agent is created (the `agent.create
 To have the recipe from the very first token, put it in the brief. Every agent's shell has its own id in `$PASEO_AGENT_ID`, so one fixed snippet works for any agent:
 
 ```
-node agent-canvas/server/brief-snippet.ts 6790      # prints the recipe with .../api/canvas/$PASEO_AGENT_ID
+node server/brief-snippet.ts 6790      # prints the recipe with .../api/canvas/$PASEO_AGENT_ID
 ```
 
 Paste its output under a "## Your canvas" heading in the crew brief and still set `labels: { canvas: "on" }`: the label turns the canvas on for that agent (the endpoint answers "off for this agent" until the label has been read, a few hundred milliseconds after creation, and the snippet tells the agent to retry), and the snippet removes the wait.
