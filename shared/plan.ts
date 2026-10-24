@@ -1,11 +1,12 @@
 // A render plan: the canvas tree turned into a short list of primitive descriptions (kind, signal, glyph, text).
 // The native and browser renderers draw from the same plan, so what a block means (which signal, which glyph,
 // which cell is best) is decided here once. Renderers only decide how to paint it.
+import { parseMarkdown, type MdBlock } from "./markdown.ts";
 import { chartPoints, type Node, type StepState } from "./canvas.ts";
 import { bgFacts, checkHonesty, summarize, type Verdict } from "./honesty.ts";
 import type { CanvasView } from "./contract.ts";
 import { pillState } from "./pill.ts";
-import { BG_CAP, FLAG_GLYPH, LAST_VISIBLE_MS, NOTE_GLYPH, STEP_GLYPH, TONES, ago, bestCells, classifyActivity, classifyJob, jobName, oneLine, flagSignal, isNumericColumn, metricSignal, noteSignal, parseDelta, runSignal, signalFor, stepSignal, visibleFlags, visibleJobs, type BgJobLike, type Delta, type Tone } from "./ui-spec.ts";
+import { BG_CAP, FLAG_GLYPH, LAST_VISIBLE_MS, STEP_GLYPH, TONES, ago, classifyActivity, classifyJob, jobName, oneLine, flagSignal, metricSignal, parseDelta, runSignal, signalFor, stepSignal, visibleFlags, visibleJobs, type BgJobLike, type Delta, type Tone } from "./ui-spec.ts";
 
 export type StepPlan = { id: string; state: StepState; text: string; glyph: string; signal: Tone };
 export type MetricPlan = { id: string; label: string; head: string; valueSignal: Tone | null; delta: Delta | null };
@@ -18,11 +19,8 @@ export type BlockPlan =
   | { kind: "decision"; id: string; label: string; chosen: string | null; reason: string }
   | { kind: "ask"; id: string; question: string; answered: string | null; options: { value: string; label: string }[] }
   | { kind: "diff"; id: string; file: string | null; add: number; del: number; lines: DiffLine[] }
-  | { kind: "code"; id: string; text: string }
   | { kind: "chart"; id: string; label: string | null; line: boolean; points: { label: string; value: number }[] }
-  | { kind: "table"; id: string; cols: string[]; numeric: boolean[]; rows: { text: string; best: boolean }[][] }
-  | { kind: "link"; id: string; href: string; text: string }
-  | { kind: "note"; id: string; signal: Tone; glyph: string; text: string };
+  | { kind: "markdown"; id: string; blocks: MdBlock[] };
 
 export function diffLines(text: string): DiffLine[] {
   return text.split("\n").map((l) => ({ kind: l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : l.startsWith("@@") ? "hunk" : "ctx", text: l }));
@@ -58,18 +56,10 @@ export function planBlock(n: Node): BlockPlan | null {
       const lines = diffLines(n.text);
       return { kind: "diff", id: n.id, file: n.attrs.file ? String(n.attrs.file) : null, add: lines.filter((l) => l.kind === "add" && !l.text.startsWith("+++")).length, del: lines.filter((l) => l.kind === "del" && !l.text.startsWith("---")).length, lines };
     }
-    case "Code": return { kind: "code", id: n.id, text: n.text };
     case "Chart": return { kind: "chart", id: n.id, label: n.attrs.title ? String(n.attrs.title) : null, line: n.attrs.kind === "line", points: chartPoints(String(n.attrs.data)) ?? [] };
-    case "Table": {
-      const cols = String(n.attrs.cols).split("|").map((c) => c.trim());
-      const raw = n.children.map((r) => r.text.split("|").map((c) => c.trim()));
-      const best = bestCells(cols, raw);
-      return { kind: "table", id: n.id, cols, numeric: cols.map((_, c) => isNumericColumn(raw, c)), rows: raw.map((r, ri) => cols.map((_, c) => ({ text: r[c] ?? "", best: best.has(`${ri}:${c}`) }))) };
-    }
-    case "Link": return { kind: "link", id: n.id, href: String(n.attrs.href), text: n.text || String(n.attrs.href) };
-    case "Note": {
-      const tone = n.attrs.tone as string | undefined;
-      return { kind: "note", id: n.id, signal: noteSignal(tone), glyph: NOTE_GLYPH[tone ?? "info"], text: n.text };
+    case "Markdown": {
+      const md = parseMarkdown(n.text);
+      return { kind: "markdown", id: n.id, blocks: md.ok ? md.blocks : [{ k: "paragraph", c: [{ t: "text", v: n.text }] }] };
     }
     default: return null;
   }

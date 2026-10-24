@@ -2,6 +2,8 @@
 // Every consumer (native renderer, HTML renderer, honesty checks, patching) works on the Node tree
 // this file produces, so nothing downstream ever sees agent-supplied code.
 
+import { codeToMarkdown, linkToMarkdown, noteToMarkdown, parseMarkdown, tableToMarkdown } from "./markdown.ts";
+
 export type AttrValue = string | number | boolean;
 export type Node = {
   tag: string;
@@ -26,11 +28,15 @@ type TagSpec = {
   text: boolean;
   /** Content is taken verbatim up to the closing tag, so `<` and `{` need no escaping. */
   raw?: boolean;
+  /** Overrides LIMITS.text for this tag. */
+  maxText?: number;
   /** May appear only inside one of these parents. */
   parents?: readonly string[];
 };
 
-export const BLOCKS = ["Bluf", "Steps", "Progress", "Metric", "Decision", "Ask", "Diff", "Chart", "Table", "Link", "Note", "Code"] as const;
+export const BLOCKS = ["Bluf", "Steps", "Progress", "Metric", "Decision", "Ask", "Markdown", "Diff", "Chart", "Table", "Link", "Note", "Code"] as const;
+/** Retired in v3: still parsed for one release, then converted to a Markdown node (see `convertRetired`). */
+export const RETIRED = ["Table", "Link", "Note", "Code"] as const;
 export const TONES = ["info", "warn", "error", "success"] as const;
 export const STEP_STATES = ["pending", "active", "done", "failed", "skipped"] as const;
 export type StepState = (typeof STEP_STATES)[number];
@@ -50,6 +56,7 @@ export const VOCABULARY: Record<string, TagSpec> = {
   Decision: { attrs: { title: { type: "string", required: true, max: 120 }, chosen: { type: "string", max: 120 } }, children: [], text: true },
   Ask: { attrs: { question: { type: "string", required: true, max: 300 }, blocking: { type: "boolean" }, answer: { type: "string", max: 300 } }, children: ["Option"], text: false },
   Option: { attrs: { value: { type: "string", required: true, max: 80 } }, children: [], text: true, parents: ["Ask"] },
+  Markdown: { attrs: {}, children: [], text: true, raw: true, maxText: 8_000 },
   Diff: { attrs: { file: { type: "string", max: 200 } }, children: [], text: true, raw: true },
   Chart: { attrs: { kind: { type: "enum", values: ["bar", "line"] }, title: { type: "string", max: 80 }, data: { type: "string", required: true, max: 2000 } }, children: [], text: false },
   Table: { attrs: { cols: { type: "string", required: true, max: 400 } }, children: ["Row"], text: false },
@@ -203,7 +210,9 @@ function finish(raw: RawNode, parent: string | null, depth: number, ids: Set<str
   checkAttrs(spec, raw.tag, raw.attrs, errors, { ...where, id });
   for (const [k, v] of Object.entries(raw.attrs)) if (k !== "id") node.attrs[k] = v;
   if (raw.text && !spec.text) errors.push({ message: `<${raw.tag}> cannot contain text ("${raw.text.slice(0, 30)}…")`, ...where, id });
-  if (raw.text.length > LIMITS.text) errors.push({ message: `<${raw.tag}> text is over ${LIMITS.text} characters`, ...where, id });
+  const maxText = spec.maxText ?? LIMITS.text;
+  if (raw.text.length > maxText) errors.push({ message: `<${raw.tag}> text is over ${maxText} characters`, ...where, id });
+  if (raw.tag === "Markdown") { const md = parseMarkdown(raw.text); if (!md.ok) errors.push({ message: `<Markdown>: ${md.error}`, ...where, id }); }
   if (raw.tag === "Link" && !/^https?:\/\//i.test(String(raw.attrs.href ?? ""))) errors.push({ message: "<Link> href must start with http:// or https://", ...where, id });
   for (const c of raw.children) node.children.push(finish(c, raw.tag, depth + 1, ids, counts, total, errors));
   if (raw.tag === "Ask" && node.children.length < 1) errors.push({ message: "<Ask> needs at least one <Option>", ...where, id });
@@ -219,7 +228,29 @@ export function parseCanvas(source: string): ParseResult {
   const total = { n: 0 };
   const root = finish(raw, null, 0, new Set(), new Map(), total, errors);
   if (total.n > LIMITS.nodes) errors.push({ message: `more than ${LIMITS.nodes} elements` });
+  if (!errors.length) convertRetired(root, errors);
   return errors.length ? { ok: false, errors } : { ok: true, root };
+}
+
+/**
+ * Table, Link, Note and Code are retired: they validate as before, then become the equivalent <Markdown> node
+ * (same id), so every tree downstream, including patch round-trips, only ever sees the new vocabulary.
+ */
+function convertRetired(root: Node, errors: Problem[]) {
+  const markdown = (n: Node, text: string): Node => {
+    const md = parseMarkdown(text);
+    if (!md.ok) errors.push({ message: `<${n.tag}> id "${n.id}": ${md.error}`, id: n.id });
+    return { tag: "Markdown", id: n.id, attrs: {}, text, children: [] };
+  };
+  root.children = root.children.map((n) => {
+    switch (n.tag) {
+      case "Table": return markdown(n, tableToMarkdown(String(n.attrs.cols), n.children.map((r) => r.text)));
+      case "Note": return markdown(n, noteToMarkdown(n.attrs.tone as string | undefined, n.text));
+      case "Link": return markdown(n, linkToMarkdown(String(n.attrs.href), n.text));
+      case "Code": return markdown(n, codeToMarkdown(n.attrs.lang as string | undefined, n.text));
+      default: return n;
+    }
+  });
 }
 
 /** "a:1,b:2" → points; null when malformed. */

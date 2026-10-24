@@ -5,6 +5,7 @@ import { planBlocks, rowPlan, selfStatus, statusPlan, type BlockPlan } from "../
 import type { CanvasView } from "../shared/contract.ts";
 import { COMPONENT_CSS, badge, bar, button, chip, cssVars, delta, esc, glyphCircle, jobChip, meta, sd, slabel, statusLine, stepRow, ticks } from "./ui-html.ts";
 import type { Node } from "../shared/canvas.ts";
+import type { Inline, MdBlock } from "../shared/markdown.ts";
 
 export { esc };
 
@@ -20,6 +21,40 @@ function lineChart(points: { label: string; value: number }[]): string {
     ${xy.map(([x, y], i) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="var(--bg)" stroke="var(--run)" stroke-width="2"/><text class="v" x="${x.toFixed(1)}" y="${(y - 8).toFixed(1)}" text-anchor="middle">${esc(points[i].value)}</text><text x="${x.toFixed(1)}" y="${H - 4}" text-anchor="middle">${esc(points[i].label)}</text>`).join("")}</svg>`;
 }
 
+const mdInline = (c: Inline[]): string =>
+  c.map((i) => {
+    switch (i.t) {
+      case "text": return esc(i.v).replace(/\n/g, "<br>");
+      case "code": return `<code>${esc(i.v)}</code>`;
+      case "strong": return `<strong>${mdInline(i.c)}</strong>`;
+      case "em": return `<em>${mdInline(i.c)}</em>`;
+      case "del": return `<del>${mdInline(i.c)}</del>`;
+      case "link": return `<a href="${esc(i.href)}" target="_blank" rel="noopener noreferrer">${mdInline(i.c)}</a>`;
+    }
+  }).join("");
+
+function mdBlock(b: MdBlock): string {
+  switch (b.k) {
+    case "heading": return `<h${Math.min(b.level + 1, 6)} class="mdh${b.level}">${mdInline(b.c)}</h${Math.min(b.level + 1, 6)}>`;
+    case "paragraph": return `<p>${mdInline(b.c)}</p>`;
+    case "hr": return `<div class="divider"></div>`;
+    case "code": return `<div class="well code">${b.text.split("\n").map((l) => `<span>${esc(l || " ")}</span>`).join("")}</div>`;
+    case "quote": return `<blockquote>${b.blocks.map(mdBlock).join("")}</blockquote>`;
+    case "alert": return `<div class="note ${b.signal}">${glyphCircle(b.signal, b.glyph, true)}<div class="mdbody"><b class="c-${b.signal}">${esc(b.title)}</b>${b.blocks.map(mdBlock).join("")}</div></div>`;
+    case "list": {
+      const tag = b.ordered ? "ol" : "ul";
+      return `<${tag}${b.ordered && b.start !== 1 ? ` start="${b.start}"` : ""}>${b.items.map((it) => `<li${it.checked === null ? "" : ' class="task"'}>${it.checked === null ? "" : `<span class="chk${it.checked ? " on" : ""}" role="img" aria-label="${it.checked ? "done" : "not done"}">${it.checked ? "✓" : ""}</span>`}<div>${it.blocks.map(mdBlock).join("")}</div></li>`).join("")}</${tag}>`;
+    }
+    case "table": {
+      const al = (i: number, extra = "") => {
+        const cls = [b.numeric[i] || b.align[i] === "right" ? "num" : b.align[i] === "center" ? "ctr" : "", extra].join(" ").trim();
+        return cls ? ` class="${cls}"` : "";
+      };
+      return `<table class="tbl"><thead><tr>${b.head.map((c, i) => `<th${al(i)}>${mdInline(c)}</th>`).join("")}</tr></thead><tbody>${b.rows.map((r) => `<tr>${r.map((c, i) => `<td${al(i, c.best ? "best" : "")}>${mdInline(c.c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    }
+  }
+}
+
 export function renderPlan(p: BlockPlan, agentId: string): string {
   switch (p.kind) {
     case "bluf": return `<p class="lede">${esc(p.text)}</p>`;
@@ -33,16 +68,12 @@ export function renderPlan(p: BlockPlan, agentId: string): string {
       return `<div class="ask"><div class="slabel">${sd("hot", { halo: false, pulse: false, size: 6 })}<span>Question</span></div><div class="q">${esc(p.question)}</div><div class="btns">${p.options.map((o) => button("secondary", o.label, `data-agent="${esc(agentId)}" data-ask="${esc(p.id)}" data-value="${esc(o.value)}"`)).join("")}</div></div>`;
     case "diff":
       return `<div class="sec">${p.file ? `<div class="pathrow"><span class="path">${esc(p.file)}</span><span class="dstat"><span class="a">+${p.add}</span> <span class="d">−${p.del}</span></span></div>` : ""}<div class="well">${p.lines.map((l) => `<span class="${l.kind === "ctx" ? "" : l.kind}">${esc(l.text || " ")}</span>`).join("")}</div></div>`;
-    case "code": return `<div class="well code">${p.text.split("\n").map((l) => `<span>${esc(l || " ")}</span>`).join("")}</div>`;
     case "chart": {
       const max = Math.max(...p.points.map((q) => q.value), 1);
       const body = p.line ? lineChart(p.points) : `<div class="chartrows">${p.points.map((q) => `<div><div class="top"><span>${esc(q.label)}</span><b style="font-weight:500">${esc(q.value)}</b></div>${bar((q.value / max) * 100, "run")}</div>`).join("")}</div>`;
       return `<div class="sec">${p.label ? slabel(p.label) : ""}${body}</div>`;
     }
-    case "table":
-      return `<table class="tbl"><thead><tr>${p.cols.map((c, i) => `<th${p.numeric[i] ? ' class="num"' : ""}>${esc(c)}</th>`).join("")}</tr></thead><tbody>${p.rows.map((r) => `<tr>${r.map((c, i) => `<td class="${[p.numeric[i] ? "num" : "", c.best ? "best" : ""].join(" ").trim()}">${esc(c.text)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
-    case "link": return `<p style="margin:0"><a href="${esc(p.href)}" target="_blank" rel="noopener noreferrer">${esc(p.text)} ↗</a></p>`;
-    case "note": return `<div class="note ${p.signal}">${glyphCircle(p.signal, p.glyph, true)}<span>${esc(p.text)}</span></div>`;
+    case "markdown": return `<div class="md">${p.blocks.map(mdBlock).join("")}</div>`;
   }
 }
 

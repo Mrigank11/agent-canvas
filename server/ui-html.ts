@@ -164,6 +164,11 @@ a{color:var(--run-t);text-decoration:none}a:hover{text-decoration:underline}
 .well{background:var(--well);border-radius:10px;padding:8px 0;font:12px/18px var(--mono);overflow:auto}.well span{display:block;padding:0 12px;white-space:pre;color:var(--muted)}
 .well .add{color:var(--ok-t);background:var(--ok-w)}.well .del{color:var(--err-t);background:var(--err-w)}.well .hunk{color:var(--run-t);opacity:.8}.well.code span{color:var(--fg)}
 .note{border-radius:10px;padding:10px 12px;display:flex;gap:10px;align-items:flex-start}.note .gc{width:18px;height:18px;border-radius:9px;font-size:11px;font-weight:700;margin-top:1px}
+.md{display:flex;flex-direction:column;gap:8px}.md p,.md ul,.md ol,.md blockquote,.md h2,.md h3,.md h4,.md h5,.md h6{margin:0}.md ul,.md ol{padding-left:22px}.md li{margin:2px 0}.md li>div>*+*{margin-top:4px}
+.md h2{font-size:18px;line-height:26px;font-weight:600}.md h3{font-size:16px;line-height:24px;font-weight:600}.md h4,.md h5,.md h6{font-size:14px;line-height:20px;font-weight:600}
+.md code{font:12px/18px var(--mono);background:var(--well);border-radius:4px;padding:1px 4px}.md .well code{background:none;padding:0}.md blockquote{border-left:2px solid var(--line-strong);padding-left:12px;color:var(--muted)}
+.md li.task{list-style:none;display:flex;gap:8px;align-items:flex-start;margin-left:-22px}.chk{width:16px;height:16px;flex:none;margin-top:2px;border-radius:4px;box-shadow:inset 0 0 0 1.5px var(--line-strong);display:inline-flex;align-items:center;justify-content:center;font-size:11px}.chk.on{background:var(--ok);color:var(--bg);box-shadow:none}
+.md .mdbody{display:flex;flex-direction:column;gap:4px;min-width:0}.md .tbl .ctr{text-align:center}.md .tbl{display:block;overflow-x:auto}
 .note.run{background:var(--run-w)}.note.warn{background:var(--warn-w)}.note.err{background:var(--err-w)}.note.ok{background:var(--ok-w)}
 .gc.solid.run{background:var(--run);color:var(--bg)}.gc.solid.warn{background:var(--warn);color:var(--bg)}.gc.solid.err{background:var(--err);color:var(--bg)}.gc.solid.ok{background:var(--ok);color:var(--bg)}
 .chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;font-size:13px;font-weight:500;align-self:flex-start}.chip.ok{background:var(--ok-w);color:var(--ok-t)}

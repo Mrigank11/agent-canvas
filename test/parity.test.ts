@@ -55,6 +55,18 @@ test("every plan kind has a native renderer and an HTML renderer", () => {
   for (const k of kinds) assert.match(html, new RegExp(`case "${k}"`), `HTML renderPlan lacks ${k}`);
 });
 
+test("every Markdown block and inline kind has a native and an HTML renderer", () => {
+  const native = read("client/blocks.tsx"), html = read("server/html.ts");
+  for (const k of ["heading", "paragraph", "hr", "code", "quote", "alert", "list", "table"]) {
+    assert.match(native, new RegExp(`case "${k}"`), `native MdBlockView lacks ${k}`);
+    assert.match(html, new RegExp(`case "${k}"`), `HTML mdBlock lacks ${k}`);
+  }
+  for (const k of ["text", "code", "strong", "em", "del", "link"]) {
+    assert.match(native, new RegExp(`case "${k}"`), `native MdInlines lacks ${k}`);
+    assert.match(html, new RegExp(`case "${k}"`), `HTML mdInline lacks ${k}`);
+  }
+});
+
 const has = (html: string, s: string) => assert.ok(html.includes(s), `HTML is missing ${s}`);
 
 test("for the showcase canvas, the HTML agrees with the plan on signal, glyph and text", () => {
@@ -79,8 +91,11 @@ test("for the showcase canvas, the HTML agrees with the plan on signal, glyph an
   const d = of("diff");
   has(html, `+${d.add}`); has(html, `−${d.del}`);
   for (const l of d.lines) if (l.kind !== "ctx") has(html, `class="${l.kind}"`);
-  assert.equal((html.match(/class="best"/g) ?? []).length + (html.match(/num best/g) ?? []).length, of("table").rows.flat().filter((c) => c.best).length);
-  for (const n of plans.filter((p) => p.kind === "note")) { has(html, `note ${n.signal}`); has(html, n.glyph); }
+  const md = plans.flatMap((p) => (p.kind === "markdown" ? p.blocks : []));
+  const table = md.find((b) => b.k === "table");
+  assert.ok(table && table.k === "table");
+  assert.equal((html.match(/class="best"/g) ?? []).length + (html.match(/num best/g) ?? []).length, table.rows.flat().filter((c) => c.best).length);
+  for (const n of md) if (n.k === "alert") { has(html, `note ${n.signal}`); has(html, n.glyph); }
   has(html, "Decision · Runtime"); has(html, "✓ Node");
   has(html, "<svg"); // a line chart draws a real line in the browser
 });

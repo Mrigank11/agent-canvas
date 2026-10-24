@@ -1,13 +1,14 @@
 // Native block renderer: composes the shared primitives from the shared plan. No colours or rules live here.
 import { useRpc } from "@getpaseo/plugin/client";
 import { useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { planBlocks, type BlockPlan } from "../shared/plan";
 import { answerRpc } from "../shared/contract";
-import { Bar, Button, Chip, DeltaChip, GlyphCircle, Meta, Region, Section, SectionLabel, Sheet, StatusDot, StepRow, Txt, Well } from "./ui/atoms";
+import { Bar, Button, Chip, DeltaChip, GlyphCircle, Hairline, Meta, Region, Section, SectionLabel, Sheet, StatusDot, StepRow, Txt, Well } from "./ui/atoms";
 import { ink, typeStyle, useT } from "./ui/tokens";
 import { openUrl } from "./common";
 import type { Node } from "../shared/canvas";
+import type { Inline, MdBlock } from "../shared/markdown";
 
 /**
  * The open question. `panel` is the one tinted region of a surface; `flat` sits inside a card that is already the
@@ -69,21 +70,78 @@ function Metrics({ plan }: { plan: Extract<BlockPlan, { kind: "metrics" }> }) {
   );
 }
 
-function Table({ plan }: { plan: Extract<BlockPlan, { kind: "table" }> }) {
+function MdInlines({ c, base }: { c: Inline[]; base?: object }) {
   const t = useT();
-  const cell = (num: boolean) => ({ flex: 1, textAlign: num ? ("right" as const) : ("left" as const) });
+  return (
+    <>
+      {c.map((i, k) => {
+        switch (i.t) {
+          case "text": return <Text key={k} style={base}>{i.v}</Text>;
+          case "code": return <Text key={k} style={[typeStyle("mono"), { color: t.fg, backgroundColor: t.well }]}>{i.v}</Text>;
+          case "strong": return <Text key={k} style={{ fontWeight: "600" }}><MdInlines c={i.c} base={base} /></Text>;
+          case "em": return <Text key={k} style={{ fontStyle: "italic" }}><MdInlines c={i.c} base={base} /></Text>;
+          case "del": return <Text key={k} style={{ textDecorationLine: "line-through", color: t.muted }}><MdInlines c={i.c} base={base} /></Text>;
+          case "link": return <Text key={k} accessibilityRole="link" onPress={() => openUrl(i.href)} style={{ color: ink(t, "run") }}><MdInlines c={i.c} base={base} /></Text>;
+        }
+      })}
+    </>
+  );
+}
+
+function MdTable({ b }: { b: Extract<MdBlock, { k: "table" }> }) {
+  const t = useT();
+  const cell = (i: number) => ({ flex: 1, textAlign: b.numeric[i] || b.align[i] === "right" ? ("right" as const) : b.align[i] === "center" ? ("center" as const) : ("left" as const) });
   return (
     <View>
       <View style={{ flexDirection: "row", backgroundColor: t.well, borderRadius: 6, paddingVertical: 5, paddingHorizontal: 8 }}>
-        {plan.cols.map((c, i) => <Text key={i} style={[typeStyle("label"), cell(plan.numeric[i]), { color: t.muted }]}>{c}</Text>)}
+        {b.head.map((c, i) => <Text key={i} style={[typeStyle("label"), cell(i), { color: t.muted }]}><MdInlines c={c} /></Text>)}
       </View>
-      {plan.rows.map((r, ri) => (
-        <View key={ri} style={{ flexDirection: "row", paddingVertical: 7, paddingHorizontal: 8, borderBottomWidth: ri === plan.rows.length - 1 ? 0 : 1, borderBottomColor: t.line }}>
-          {r.map((c, ci) => <Text key={ci} style={[typeStyle("body", c.best ? "500" : "400"), cell(plan.numeric[ci]), { color: c.best ? ink(t, "ok") : t.fg }]}>{c.text}</Text>)}
+      {b.rows.map((r, ri) => (
+        <View key={ri} style={{ flexDirection: "row", paddingVertical: 7, paddingHorizontal: 8, borderBottomWidth: ri === b.rows.length - 1 ? 0 : 1, borderBottomColor: t.line }}>
+          {r.map((c, ci) => <Text key={ci} style={[typeStyle("body", c.best ? "500" : "400"), cell(ci), { color: c.best ? ink(t, "ok") : t.fg }]}><MdInlines c={c.c} /></Text>)}
         </View>
       ))}
     </View>
   );
+}
+
+const HEADING_ROLE = ["screenTitle", "ledeStrong", "ledeStrong", "body", "body", "body"] as const;
+
+function MdBlockView({ b }: { b: MdBlock }) {
+  const t = useT();
+  switch (b.k) {
+    case "heading": return <Text style={[typeStyle(HEADING_ROLE[b.level - 1], "600"), { color: t.fg }]}><MdInlines c={b.c} /></Text>;
+    case "paragraph": return <Text style={[typeStyle("body"), { color: t.fg }]}><MdInlines c={b.c} /></Text>;
+    case "hr": return <Hairline />;
+    case "code": return <Well>{b.text.split("\n").map((l, i) => <Text key={i} style={[typeStyle("mono"), { color: t.fg, paddingHorizontal: 12 }]}>{l || " "}</Text>)}</Well>;
+    case "quote": return <View style={{ borderLeftWidth: 2, borderLeftColor: t.lineStrong, paddingLeft: 12, gap: 6 }}>{b.blocks.map((x, i) => <MdBlockView key={i} b={x} />)}</View>;
+    case "alert":
+      return (
+        <Region tone={b.signal} style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
+          <GlyphCircle size={18} tone={b.signal} glyph={b.glyph} solid weight="700" />
+          <View style={{ flex: 1, gap: 4 }}>
+            <Txt role="label" c={b.signal}>{b.title}</Txt>
+            {b.blocks.map((x, i) => <MdBlockView key={i} b={x} />)}
+          </View>
+        </Region>
+      );
+    case "list":
+      return (
+        <View style={{ gap: 4 }}>
+          {b.items.map((it, i) => (
+            <View key={i} style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
+              {it.checked === null ? (
+                <Text style={[typeStyle("body"), { color: t.muted, minWidth: 18 }]}>{b.ordered ? `${b.start + i}.` : "•"}</Text>
+              ) : (
+                <Text accessibilityLabel={it.checked ? "done" : "not done"} style={[typeStyle("body"), { color: it.checked ? ink(t, "ok") : t.faint, minWidth: 18 }]}>{it.checked ? "☑" : "☐"}</Text>
+              )}
+              <View style={{ flex: 1, gap: 4 }}>{it.blocks.map((x, k) => <MdBlockView key={k} b={x} />)}</View>
+            </View>
+          ))}
+        </View>
+      );
+    case "table": return <MdTable b={b} />;
+  }
 }
 
 function Diff({ plan }: { plan: Extract<BlockPlan, { kind: "diff" }> }) {
@@ -162,22 +220,8 @@ export function BlockView({ plan, agentId, askVariant, dense }: { plan: BlockPla
       );
     case "ask": return <AskPanel plan={plan} agentId={agentId} variant={askVariant} />;
     case "diff": return <Diff plan={plan} />;
-    case "code": return <Well>{plan.text.split("\n").map((l, i) => <Text key={i} style={[typeStyle("mono"), { color: t.fg, paddingHorizontal: 12 }]}>{l || " "}</Text>)}</Well>;
     case "chart": return <Chart plan={plan} />;
-    case "table": return <Table plan={plan} />;
-    case "link":
-      return (
-        <Pressable accessibilityRole="link" onPress={() => openUrl(plan.href)} style={{ alignSelf: "flex-start" }}>
-          <Txt c="run">{plan.text} ↗</Txt>
-        </Pressable>
-      );
-    case "note":
-      return (
-        <Region tone={plan.signal} style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
-          <GlyphCircle size={18} tone={plan.signal} glyph={plan.glyph} solid weight="700" />
-          <View style={{ flex: 1 }}><Txt>{plan.text}</Txt></View>
-        </Region>
-      );
+    case "markdown": return <View style={{ gap: 8 }}>{plan.blocks.map((b, i) => <MdBlockView key={i} b={b} />)}</View>;
   }
 }
 

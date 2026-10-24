@@ -94,7 +94,7 @@ Always keep `--home /home/mrigank/.paseo-canvas-demo`. Without it `paseo` target
 
 ## 6. What is real and what is a prototype
 
-Built: the vocabulary (Canvas, Bluf, Steps/Step, Progress, Metric, Decision, Ask/Option, Diff, Chart, Table/Row, Link, Note, Code) with a parser that never executes anything (unknown tags, expressions, `javascript:` links all rejected, errors with line numbers go back to the agent); atomic `canvas_set` / `canvas_patch` / `canvas_get` MCP tools injected at agent creation; the honesty cross-checks (done-but-running, stale, idle-unfinished, error dimming, Ask → Needs you only when idle); the auto canvas; the native pane row, Canvases screen, panel and pill; the HTML view; Ask answers sent to the agent. Tests: 33 in `agent-canvas` (parser, patching, honesty, hub, MCP, HTML escaping); the 206 `firstmate-deck` tests still pass.
+Built: the vocabulary (Canvas, Bluf, Steps/Step, Progress, Metric, Decision, Ask/Option, Markdown, Diff, Chart; Table/Row, Link, Note and Code are retired and convert to Markdown) with a parser that never executes anything (unknown tags, expressions, `javascript:` links all rejected, errors with line numbers go back to the agent); atomic `canvas_set` / `canvas_patch` / `canvas_get` MCP tools injected at agent creation; the honesty cross-checks (done-but-running, stale, idle-unfinished, error dimming, Ask → Needs you only when idle); the auto canvas; the native pane row, Canvases screen, panel and pill; the HTML view; Ask answers sent to the agent. Tests: 33 in `agent-canvas` (parser, patching, honesty, hub, MCP, HTML escaping); the 206 `firstmate-deck` tests still pass.
 
 ## 7. Known limits
 

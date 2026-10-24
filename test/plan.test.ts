@@ -27,7 +27,7 @@ export const viewOf = (tree = showcaseTree(), o: Partial<CanvasView> = {}): Canv
 
 test("a canvas plans to one entry per block, with runs of metrics merged", () => {
   const plans = planBlocks(showcaseTree());
-  assert.deepEqual(plans.map((p) => p.kind), ["bluf", "steps", "progress", "metrics", "decision", "ask", "diff", "chart", "table", "link", "note", "note", "code"]);
+  assert.deepEqual(plans.map((p) => p.kind), ["bluf", "steps", "progress", "metrics", "decision", "ask", "diff", "chart", "markdown", "markdown", "markdown", "markdown", "markdown"]);
   assert.equal(plans.find((p) => p.kind === "metrics" && p.items.length === 3) !== undefined, true);
 });
 
@@ -46,8 +46,8 @@ test("progress turns ok at 100 percent, metrics carry tone and delta, tables mar
   assert.ok(m && m.kind === "metrics");
   assert.deepEqual(m.items.map((i) => i.valueSignal), ["ok", "warn", null]);
   assert.deepEqual([m.items[1].head, m.items[1].delta?.signal], ["480ms", "err"]); // a rise on a warn metric is bad
-  const t = plans.find((p) => p.kind === "table");
-  assert.ok(t && t.kind === "table");
+  const t = plans.flatMap((p) => (p.kind === "markdown" ? p.blocks : [])).find((b) => b.k === "table");
+  assert.ok(t && t.k === "table"); // the retired <Table> is a Markdown table now, with the same best-cell rule
   assert.deepEqual(t.rows.flatMap((r, ri) => r.flatMap((c, ci) => (c.best ? [`${ri}:${ci}`] : []))), ["0:2", "1:1"]);
   assert.deepEqual(t.numeric, [false, true, true]);
 });
@@ -61,7 +61,8 @@ test("diff counts, answered asks collapse to the chosen label, notes carry glyph
   assert.equal(ask.answered, null);
   const answered = planBlock({ ...showcaseTree().children.find((c) => c.tag === "Ask")!, attrs: { question: "Q?", answer: "ddb" } });
   assert.deepEqual(answered && answered.kind === "ask" && answered.answered, "DynamoDB");
-  assert.deepEqual(plans.filter((p) => p.kind === "note").map((n) => n.kind === "note" && [n.glyph, n.signal]), [["!", "warn"], ["✓", "ok"]]);
+  const alerts = plans.flatMap((p) => (p.kind === "markdown" ? p.blocks : [])).flatMap((b) => (b.k === "alert" ? [[b.glyph, b.signal]] : []));
+  assert.deepEqual(alerts, [["!", "warn"], ["✓", "ok"]]); // <Note> became an alert
 });
 
 test("the status line leads with the question, lists facts, and gives each flag its own line", () => {

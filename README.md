@@ -31,6 +31,10 @@ Plugins are trusted code; read `OVERVIEW.md` for what it does and where it liste
 - `client/` React Native renderer, screens, side panel, pill, settings
 - `skill/agent-canvas/` the agent-facing skill; `demo/` demo agents; `test/` unit tests
 
+## Content blocks (vocabulary v3)
+
+Standard formats for content, custom tags for state. `<Markdown>` takes CommonMark + GFM (headings, lists, task lists, tables, fenced code, links, `> [!WARNING]` alerts) written as-is; the body is parsed server-side by `shared/markdown.ts`, our own dependency-free parser (the plugin has no runtime `node_modules`), into a tree that both renderers draw (`mdBlock` in `server/html.ts`, `MdBlockView` in `client/blocks.tsx`). Raw HTML is shown as text, links keep only `http(s):`/`mailto:`, and images are rejected until the `<Image>` block lands. Body limit 8,000 chars. `Table`/`Row`, `Note`, `Link` and `Code` are retired: they still parse for one release, are validated as before, then become a `Markdown` node with the same id (`convertRetired` in `shared/canvas.ts`), so patches and round-trips only ever see the new vocabulary. Tests: `test/markdown.test.ts`, `test/parity.test.ts`.
+
 ## Background jobs
 
 A Claude Code agent that starts a background command or a Monitor and goes idle is waiting, not stuck. The status line shows one **Background** row per job under the Now row (spinner and timer while it runs, a check and the exit code for 10 minutes after, one red-tinted row for a failure), a compact chip ("2 in background") on the timeline card and in the Canvases list, and a **Waiting** verdict (pill "Waiting · 2") for an idle agent with a running job. A canvas that says done while a job runs, or that has not caught up with a failed job, is **Disputed**; jobs left running when the agent errors or closes are **lost**.
