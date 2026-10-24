@@ -67,7 +67,7 @@ function groupMetrics(nodes: Node[]): (Node | Node[])[] {
   return out;
 }
 
-export function CanvasBody({ view, theme, withBrowserLink, live = null }: { view: CanvasView; theme: Theme; withBrowserLink?: boolean; live?: Live }) {
+export function CanvasBody({ view, theme, withBrowserLink, live = null, onOpenAgent }: { view: CanvasView; theme: Theme; withBrowserLink?: boolean; live?: Live; onOpenAgent?: () => void }) {
   const { verdict } = useVerdict(view, live);
   const t = view.tree;
   return (
@@ -91,7 +91,10 @@ export function CanvasBody({ view, theme, withBrowserLink, live = null }: { view
         )}
         {t.children.length === 0 ? <Text style={{ color: theme.colors.foregroundMuted }}>Nothing yet.</Text> : null}
       </View>
-      {withBrowserLink ? <Button theme={theme} quiet label="Open in browser" onPress={() => openUrl(view.url)} /> : null}
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        {onOpenAgent ? <Button theme={theme} label="Open agent" onPress={onOpenAgent} /> : null}
+        {withBrowserLink ? <Button theme={theme} quiet label="Open in browser" onPress={() => openUrl(view.url)} /> : null}
+      </View>
     </View>
   );
 }

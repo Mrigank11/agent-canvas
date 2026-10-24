@@ -18,7 +18,7 @@ type Authored = { source: Node; updatedAt: number; callsAtUpdate: number };
 /** What Paseo says. */
 type Live = { title: string | null; runState: RunState; callIds: Set<string>; items: AutoItem[]; currentTool: string | null; lastActivityAt: number; seq: number };
 
-export type HubOptions = { log: (m: string) => void; stateFile: string | null; publicBase: string; localBase: string; now?: () => number };
+export type HubOptions = { log: (m: string) => void; stateFile: string | null; publicBase: string; localBase: string; agentLink?: (agentId: string) => string | null; now?: () => number };
 
 const isRunState = (s: string): s is RunState => ["initializing", "idle", "running", "error", "closed"].includes(s);
 
@@ -294,6 +294,7 @@ export class Hub {
       currentTool: l.currentTool,
       lastActivityAt: l.lastActivityAt,
       url: `${this.o.publicBase}/a/${agentId}`,
+      agentUrl: this.o.agentLink?.(agentId) ?? null,
     };
   }
 

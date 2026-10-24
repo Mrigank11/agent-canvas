@@ -101,7 +101,7 @@ export function renderCanvas(v: CanvasView, now: number): string {
   const verdict = verdictFor(v, now);
   const t = v.tree;
   return `${renderStrip(v, verdict, now)}<article class="canvas${verdict.dim ? " dim" : ""}">
-    <header><h1>${esc(v.title)}</h1>${v.auto ? '<span class="tag">auto canvas</span>' : `<span class="tag st-${esc(t.attrs.status ?? "working")}">${esc(t.attrs.status ?? "working")}</span>`}</header>
+    <header><h1>${esc(v.title)}</h1>${v.agentUrl ? `<a class="agentlink" href="${esc(v.agentUrl)}" target="_blank" rel="noopener noreferrer">Open agent in Paseo ↗</a>` : ""}${v.auto ? '<span class="tag">auto canvas</span>' : `<span class="tag st-${esc(t.attrs.status ?? "working")}">${esc(t.attrs.status ?? "working")}</span>`}</header>
     <div class="blocks">${renderChildren(t.children, v.agentId) || '<p class="muted">Nothing yet.</p>'}</div>
   </article>`;
 }
@@ -133,7 +133,7 @@ h1{font-size:22px;margin:0}h3{font-size:12px;letter-spacing:.06em;text-transform
 @keyframes p{50%{opacity:.3}}
 .flag{margin:6px 0;padding:8px 12px;border-radius:10px;font-size:13px;background:#1b1e26;border:1px solid var(--line)}.sev-warn{border-color:var(--warn);color:#ffd9a0}.sev-error{border-color:var(--err);color:#ffb3ba}.sev-info{border-color:var(--accent)}
 .canvas{margin-top:14px}.canvas.dim{opacity:.45;filter:grayscale(.6)}.canvas header{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
-.tag{font-size:11px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}.st-done{color:var(--ok);border-color:var(--ok)}.st-blocked{color:var(--err);border-color:var(--err)}.st-waiting{color:var(--warn);border-color:var(--warn)}
+.agentlink{font-size:12px;padding:3px 10px;border:1px solid var(--accent);border-radius:99px;text-decoration:none}.agentlink:hover{background:var(--accent);color:#000}.tag{font-size:11px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--muted)}.st-done{color:var(--ok);border-color:var(--ok)}.st-blocked{color:var(--err);border-color:var(--err)}.st-waiting{color:var(--warn);border-color:var(--warn)}
 .blocks{display:flex;flex-direction:column;gap:10px}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
 .bluf{font-size:17px;margin:4px 0}.muted{color:var(--muted)}.mono{font-family:ui-monospace,monospace;text-transform:none;letter-spacing:0}
 .steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}.step{display:flex;gap:10px}.step .ic{width:18px;text-align:center}

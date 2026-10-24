@@ -34,10 +34,11 @@ function Tile({ v, theme, onOpen }: { v: CanvasView; theme: Theme; onOpen: () =>
   );
 }
 
-function ListBody({ theme, layout }: PluginScreenProps) {
-  return <Inner theme={theme} compact={layout.compact} />;
+function ListBody({ theme, layout, navigation }: PluginScreenProps) {
+  return <Inner theme={theme} compact={layout.compact} openAgent={navigation?.openAgent} />;
 }
-function Inner({ theme, compact }: { theme: Theme; compact: boolean }) {
+type OpenAgent = (input: { agentId: string }) => void;
+function Inner({ theme, compact, openAgent }: { theme: Theme; compact: boolean; openAgent?: OpenAgent }) {
   const { views, loading, unavailable } = useViews();
   const [open, setOpen] = useState<string | null>(null);
   const sel = views.find((v) => v.agentId === open) ?? null;
@@ -46,7 +47,7 @@ function Inner({ theme, compact }: { theme: Theme; compact: boolean }) {
     return (
       <ScrollView style={{ flex: 1, backgroundColor: theme.colors.surface0 }} contentContainerStyle={{ padding: pad, gap: 14 }}>
         <Button theme={theme} quiet label="← All canvases" onPress={() => setOpen(null)} />
-        <CanvasBody view={sel} theme={theme} withBrowserLink />
+        <CanvasBody view={sel} theme={theme} withBrowserLink onOpenAgent={openAgent ? () => openAgent({ agentId: sel.agentId }) : undefined} />
       </ScrollView>
     );
   }

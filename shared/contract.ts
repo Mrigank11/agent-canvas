@@ -29,6 +29,8 @@ export const canvasView = z.object({
   lastActivityAt: z.number(),
   /** Where the browser view lives, e.g. http://host:6790/a/<id>. */
   url: z.string(),
+  /** The agent in the Paseo web UI (deep link), when the daemon serves one. */
+  agentUrl: z.string().nullable(),
 });
 export type CanvasView = z.output<typeof canvasView>;
 

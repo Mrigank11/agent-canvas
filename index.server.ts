@@ -4,12 +4,14 @@ import { readFileSync } from "node:fs";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { answerRpc, enableRpc, getRpc, listRpc } from "./shared/contract.ts";
 import { Hub } from "./server/hub.ts";
+import { agentDeepLink } from "./shared/links.ts";
 import { startHttp } from "./server/http.ts";
 import { VOCAB_DOC } from "./server/vocab-doc.ts";
 
 const PORT = Number(process.env.AGENT_CANVAS_PORT ?? 6790);
 const BIND = process.env.AGENT_CANVAS_BIND ?? "0.0.0.0";
 const PUBLIC = (process.env.AGENT_CANVAS_PUBLIC_URL ?? `http://manjaro.tail2e75.ts.net:${PORT}`).replace(/\/$/, "");
+const APP = (process.env.AGENT_CANVAS_APP_URL ?? "http://manjaro.tail2e75.ts.net:6781").replace(/\/$/, "");
 const LOCAL = `http://127.0.0.1:${PORT}`;
 const OPT_IN = "AGENT_CANVAS";
 const KEY = "AGENT_CANVAS_KEY";
@@ -23,6 +25,11 @@ function detectHome(): string {
   return join(homedir(), ".paseo");
 }
 
+/** The daemon's id, which the Paseo web app uses as the host in its routes (/h/<serverId>/agent/<agentId>). */
+function serverId(home: string): string | null {
+  try { return readFileSync(join(home, "server-id"), "utf8").trim() || null; } catch { return null; }
+}
+
 const INSTRUCTIONS = (url: string) => `You have a live canvas the human watches instead of your chat. This session has no canvas tool, so use plain HTTP with curl:
   set:   curl -s -X POST ${url} --data-binary @canvas.tsx
   patch: curl -s -X POST ${url}/patch -H 'content-type: application/json' -d '[{"id":"build","set":{"state":"done"}}]'
@@ -32,7 +39,7 @@ Errors come back as JSON; fix them and retry.\n\n${VOCAB_DOC}`;
 export default function contribute(server: PluginServerContext) {
   const log = (m: string) => console.log(`[agent-canvas] ${m}`);
   const home = detectHome();
-  const hub = new Hub({ log, stateFile: join(home, "agent-canvas", "state.json"), publicBase: PUBLIC, localBase: LOCAL });
+  const hub = new Hub({ log, stateFile: join(home, "agent-canvas", "state.json"), publicBase: PUBLIC, localBase: LOCAL, agentLink: (id) => agentDeepLink(APP, serverId(home), id) });
   log(`starting (pid ${process.pid}, daemon home ${home})`);
   let http: Awaited<ReturnType<typeof startHttp>> | null = null;
   startHttp(hub, PORT, BIND, log).then((s) => (http = s)).catch((e) => log(`http failed: ${e?.message ?? e}`));
