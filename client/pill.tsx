@@ -4,9 +4,10 @@ import { View } from "react-native";
 import { pillState } from "../shared/pill";
 import { planBlocks, statusPlan } from "../shared/plan";
 import { listRpc, overrideRpc, type CanvasView } from "../shared/contract";
+import { BG_CAP } from "../shared/ui-spec";
 import { Blocks } from "./blocks";
 import { CanvasProvider, openUrl, useNow, useView } from "./common";
-import { ActivityRow, Button, Meta, ProgressTicks, StatusBadge, StatusDot, Txt } from "./ui/atoms";
+import { ActivityRow, Button, JobGroup, Meta, ProgressTicks, StatusBadge, StatusDot, Txt } from "./ui/atoms";
 import { UiRoot } from "./ui/tokens";
 import { focusStore, pillStore, reportFocus, usePillState } from "./store";
 
@@ -59,7 +60,7 @@ function MiniCanvas({ theme, agentId, close, openSide }: PluginButtonContentProp
 }
 
 function Inner({ view, now, agentId }: { view: CanvasView; now: number; agentId: string }) {
-  const plan = statusPlan(view, now);
+  const plan = statusPlan(view, now, undefined, BG_CAP.popover);
   const steps = planBlocks(view.tree, new Set(["Steps"]))[0];
   const lead = plan.lead ?? plan.flags[0]?.text ?? null;
   return (
@@ -76,7 +77,8 @@ function Inner({ view, now, agentId }: { view: CanvasView; now: number; agentId:
           </View>
         ) : null}
         {plan.activity ? <ActivityRow plan={plan.activity} /> : null}
-        {lead ? <Meta c={plan.lead ? "hot" : plan.flags[0]?.signal}>{lead}</Meta> : null}
+        {plan.background ? <JobGroup plan={plan.background} /> : null}
+        {lead ? <Meta c={plan.lead ? plan.leadSignal : plan.flags[0]?.signal}>{lead}</Meta> : null}
       </View>
       <Blocks root={view.tree} agentId={agentId} only={new Set(["Bluf", "Steps", "Progress", "Metric", "Ask"])} askVariant="panel" dense gap={16} />
     </View>

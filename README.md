@@ -31,6 +31,12 @@ Plugins are trusted code; read `OVERVIEW.md` for what it does and where it liste
 - `client/` React Native renderer, screens, side panel, pill, settings
 - `skill/agent-canvas/` the agent-facing skill; `demo/` demo agents; `test/` unit tests
 
+## Background jobs
+
+A Claude Code agent that starts a background command or a Monitor and goes idle is waiting, not stuck. The status line shows one **Background** row per job under the Now row (spinner and timer while it runs, a check and the exit code for 10 minutes after, one red-tinted row for a failure), a compact chip ("2 in background") on the timeline card and in the Canvases list, and a **Waiting** verdict (pill "Waiting · 2") for an idle agent with a running job. A canvas that says done while a job runs, or that has not caught up with a failed job, is **Disputed**; jobs left running when the agent errors or closes are **lost**.
+
+What the plugin can see (Paseo 0.12, Claude Code only): the start from Claude's result text (`running in background with ID: …`, `Monitor started (task …`), pinned in `shared/ui-spec.ts` with fixture tests; the finish from Paseo's `task_notification` items (`metadata.toolUseId` joins it to the launch, `metadata.status` decides done, failed or killed, the exit code is parsed from the summary text); times are the hub's first-seen stamps, so a job already running when the plugin first reads an agent shows "≥ 3m". A finish whose start was not recognised still appears, as a finished job. Codex and OpenCode agents show nothing. No output tails: that needs the daemon's disk, outside the Paseo API. Rules: `shared/honesty.ts`; rows and chip: `backgroundPlan` in `shared/plan.ts`; tests: `test/background.test.ts`.
+
 ## Who gets a canvas (configuration)
 
 Precedence: **per-agent override, then the global switch, then the default.** One resolver, `shared/config.ts` (`resolveCanvas`), unit-tested for every combination.

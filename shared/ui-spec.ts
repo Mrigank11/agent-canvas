@@ -113,7 +113,7 @@ export function signalFor(label: Verdict["label"]): Tone {
     case "Error": return "err";
     case "Needs you": return "hot";
     case "Disputed": case "Stale": return "warn";
-    case "Working": return "run";
+    case "Working": case "Waiting": return "run";
     case "Done": return "ok";
     default: return "idle"; // Idle, Closed
   }
@@ -257,4 +257,51 @@ export function classifyActivity(a: { kind: ActivityKind; name: string; command?
       return mk("Wrench", label, label);
     }
   }
+}
+
+// ---------- background jobs: what an agent is waiting on ----------
+
+/**
+ * Claude Code's English result text is the only "a job started" signal Paseo 0.12 exposes (there is no structured flag), so the
+ * two patterns live here, pinned by fixture tests. A wording change degrades to an unrecognised, finished-only job (see hub.ts), never to a crash.
+ */
+export const BG_SHELL_STARTED = /running in background with ID: (\w+)/;
+export const BG_MONITOR_STARTED = /Monitor started \(task (\w+)(?:, expires in ([^)]*?)(?: unless[^)]*)?)?\)/;
+/** "… completed (exit code 0)" in a task notification's summary: the only place an exit code appears. */
+export const BG_EXIT_CODE = /\(exit code (-?\d+)\)/;
+export const parseExitCode = (summary: string | undefined | null): number | null => { const m = BG_EXIT_CODE.exec(summary ?? ""); return m ? Number(m[1]) : null; };
+/** A finished job stays on the canvas this long. */
+export const BG_VISIBLE_MS = 10 * 60_000;
+/** Rows shown before "+n more": the side panel and browser, a phone, the pill popover. */
+export const BG_CAP = { wide: 3, phone: 2, popover: 3 } as const;
+
+export type BgKind = "shell" | "monitor" | "subagent";
+export type BgState = "running" | "done" | "failed" | "killed" | "lost";
+/** The fields of a job the display rules read (the view's BgJob satisfies it). */
+export type BgJobLike = { id: string; kind: BgKind; command: string; description?: string; state: BgState; exitCode?: number | null; startedAt: number; approx?: boolean; endedAt?: number; lastEvent?: string; events?: number; expires?: string };
+
+const quoted = (s: string) => `\u201c${oneLine(s, 40)}\u201d`;
+/** A short name for a job in a flag or a chip: the description, else the command's first word. */
+export function jobName(j: Pick<BgJobLike, "kind" | "command" | "description">): string {
+  if (j.description) return oneLine(j.description, 40);
+  const { words } = shellHead(j.command);
+  return words[0] ?? (j.kind === "monitor" ? "monitor" : "job");
+}
+/** The row for one job: the same icon and label rules as the Now row, with the past tense for a finished one. */
+export function classifyJob(j: Pick<BgJobLike, "kind" | "command" | "description">): Classified {
+  if (j.kind === "monitor") {
+    const what = j.description ? quoted(j.description) : "a source";
+    return { icon: "Eye", label: `Watching ${what}`, past: `Watched ${what}`, target: j.command ? shortTarget(j.command) : null, bookkeeping: false };
+  }
+  return classifyActivity({ kind: "shell", name: "Bash", command: j.command });
+}
+
+/** The jobs worth showing, in order: running (oldest first), then finished within 10 minutes (newest first). The agent's own canvas curls are bookkeeping and never listed. */
+export function visibleJobs(view: { background?: readonly BgJobLike[]; runState: string }, now: number): BgJobLike[] {
+  const dead = view.runState === "error" || view.runState === "closed";
+  const jobs = (view.background ?? []).map((j): BgJobLike => (j.state === "running" && dead ? { ...j, state: "lost", endedAt: j.endedAt ?? now } : j));
+  const shown = jobs.filter((j) => (j.state === "running" || now - (j.endedAt ?? j.startedAt) <= BG_VISIBLE_MS) && !classifyJob(j).bookkeeping);
+  const run = shown.filter((j) => j.state === "running").sort((a, b) => a.startedAt - b.startedAt);
+  const done = shown.filter((j) => j.state !== "running").sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0));
+  return [...run, ...done];
 }

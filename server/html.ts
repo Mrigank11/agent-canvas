@@ -3,7 +3,7 @@
 // esc(); there is no innerHTML path for agent text and no script in the output.
 import { planBlocks, rowPlan, selfStatus, statusPlan, type BlockPlan } from "../shared/plan.ts";
 import type { CanvasView } from "../shared/contract.ts";
-import { COMPONENT_CSS, badge, bar, button, chip, cssVars, delta, esc, glyphCircle, meta, sd, slabel, statusLine, stepRow, ticks } from "./ui-html.ts";
+import { COMPONENT_CSS, badge, bar, button, chip, cssVars, delta, esc, glyphCircle, jobChip, meta, sd, slabel, statusLine, stepRow, ticks } from "./ui-html.ts";
 import type { Node } from "../shared/canvas.ts";
 
 export { esc };
@@ -66,7 +66,7 @@ export function renderIndex(views: CanvasView[], now: number): string {
   const head = `<div class="sheet" style="margin-bottom:12px"><div class="trow" style="align-items:center"><span class="screentitle">Canvases</span>${need ? badge("hot", `${need} need you`) : ""}</div>${meta("Every agent's live view of its work. Tap one to open it.")}</div>`;
   return `${head}<div class="list">${plans
     .map(
-      (p) => `<a class="row${p.needsYou ? " need" : ""}${p.dim ? " dim" : ""}" href="/a/${esc(p.agentId)}"><div class="l1">${sd(p.signal)}<b>${esc(p.title)}</b>${ticks(p.ticks)}<span class="sp"></span>${badge(p.signal, p.label, p.signal === "ok" ? "check" : "dot")}</div>${p.bluf ? `<div class="ind bl">${esc(p.bluf)}</div>` : ""}<div class="ind">${meta(p.meta)}</div>${p.flag ? `<div class="ind">${`<div class="flag ${p.flag.signal}">${glyphCircle(p.flag.signal, p.flag.glyph)}<span>${esc(p.flag.text)}</span></div>`}</div>` : ""}</a>`,
+      (p) => `<a class="row${p.needsYou ? " need" : ""}${p.dim ? " dim" : ""}" href="/a/${esc(p.agentId)}"><div class="l1">${sd(p.signal)}<b>${esc(p.title)}</b>${ticks(p.ticks)}<span class="sp"></span>${badge(p.signal, p.label, p.signal === "ok" ? "check" : "dot")}</div>${p.bluf ? `<div class="ind bl">${esc(p.bluf)}</div>` : ""}<div class="ind">${meta(p.meta)}${p.jobs ? jobChip(p.jobs) : ""}</div>${p.flag ? `<div class="ind">${`<div class="flag ${p.flag.signal}">${glyphCircle(p.flag.signal, p.flag.glyph)}<span>${esc(p.flag.text)}</span></div>`}</div>` : ""}</a>`,
     )
     .join("")}</div>`;
 }

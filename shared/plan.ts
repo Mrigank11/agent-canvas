@@ -2,10 +2,10 @@
 // The native and browser renderers draw from the same plan, so what a block means (which signal, which glyph,
 // which cell is best) is decided here once. Renderers only decide how to paint it.
 import { chartPoints, type Node, type StepState } from "./canvas.ts";
-import { checkHonesty, summarize, type Verdict } from "./honesty.ts";
+import { bgFacts, checkHonesty, summarize, type Verdict } from "./honesty.ts";
 import type { CanvasView } from "./contract.ts";
 import { pillState } from "./pill.ts";
-import { FLAG_GLYPH, LAST_VISIBLE_MS, NOTE_GLYPH, STEP_GLYPH, TONES, ago, bestCells, classifyActivity, oneLine, flagSignal, isNumericColumn, metricSignal, noteSignal, parseDelta, runSignal, signalFor, stepSignal, visibleFlags, type Delta, type Tone } from "./ui-spec.ts";
+import { BG_CAP, FLAG_GLYPH, LAST_VISIBLE_MS, NOTE_GLYPH, STEP_GLYPH, TONES, ago, bestCells, classifyActivity, classifyJob, jobName, oneLine, flagSignal, isNumericColumn, metricSignal, noteSignal, parseDelta, runSignal, signalFor, stepSignal, visibleFlags, visibleJobs, type BgJobLike, type Delta, type Tone } from "./ui-spec.ts";
 
 export type StepPlan = { id: string; state: StepState; text: string; glyph: string; signal: Tone };
 export type MetricPlan = { id: string; label: string; head: string; valueSignal: Tone | null; delta: Delta | null };
@@ -122,6 +122,85 @@ export function activityPlan(view: Pick<CanvasView, "activity" | "recent">, now:
 }
 const iconForKind = (k: string) => (k === "shell" ? "SquareTerminal" : k === "edit" || k === "write" ? "Pencil" : k === "read" ? "Eye" : k === "search" ? "Search" : k === "fetch" ? "Globe" : "Wrench");
 
+// ---------- background jobs (the Background rows and the compact chip) ----------
+
+export type JobRowPlan = {
+  id: string;
+  kind: BgJobLike["kind"];
+  /** run = ticking; ok = finished clean; err = failed or killed (the one red-tinted row); idle = lost */
+  tone: "run" | "ok" | "err" | "idle";
+  state: BgJobLike["state"];
+  icon: string;
+  label: string;
+  target: string | null;
+  /** "6m 12s" (a lower bound reads "≥ 6m 12s") while running; "exit 0 · 2m ago" once finished */
+  elapsed: string;
+  /** Right-hand count for a Monitor: "2 events". */
+  extra: string | null;
+  /** The full command and the last Monitor event, for the expanded state. */
+  full: string | null;
+  lastEvent: string | null;
+};
+export type JobChipPlan = { tone: "run" | "ok" | "err" | "warn"; glyph: string; text: string };
+export type BackgroundPlan = {
+  heading: string;
+  /** "2 running", or "1 finished" when none is running */
+  count: string;
+  rows: JobRowPlan[];
+  /** Jobs beyond the cap: "+1 more · Monitor “deploy logs”" */
+  more: string | null;
+  /** B's compact form, for the timeline card and the Canvases list. */
+  chip: JobChipPlan;
+  running: number;
+};
+
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+function jobRow(j: BgJobLike, now: number): JobRowPlan {
+  const c = classifyJob(j);
+  const running = j.state === "running";
+  const tone: JobRowPlan["tone"] = running ? "run" : j.state === "done" ? "ok" : j.state === "lost" ? "idle" : "err";
+  const exit = j.exitCode != null ? `exit ${j.exitCode}` : j.state === "killed" ? "killed" : j.state === "lost" ? "lost" : j.state === "failed" ? "failed" : null;
+  const tail = `${ago(now - (j.endedAt ?? now))} ago`;
+  const elapsed = running ? `${j.approx ? "≥ " : ""}${ago(now - j.startedAt)}` : [exit, tail].filter(Boolean).join(" · ");
+  const events = j.events ?? 0;
+  return {
+    id: j.id,
+    kind: j.kind,
+    tone,
+    state: j.state,
+    icon: c.icon,
+    label: running || j.state === "lost" ? c.label : c.past,
+    target: j.kind === "monitor" ? ["Monitor", running && j.expires ? `expires in ${j.expires}` : null].filter(Boolean).join(" · ") : c.target,
+    elapsed,
+    extra: j.kind === "monitor" && events > 0 ? plural(events, "event") : null,
+    full: j.command || null,
+    lastEvent: j.lastEvent ?? null,
+  };
+}
+
+export function backgroundPlan(view: Pick<CanvasView, "background" | "runState">, now: number, cap: number = BG_CAP.wide): BackgroundPlan | null {
+  const jobs = visibleJobs(view, now);
+  if (!jobs.length) return null;
+  const rows = jobs.slice(0, cap).map((j) => jobRow(j, now));
+  const left = jobs.slice(cap);
+  const running = jobs.filter((j) => j.state === "running").length;
+  const failed = jobs.filter((j) => j.state === "failed" || j.state === "killed").length;
+  const lost = jobs.filter((j) => j.state === "lost").length;
+  const chip: JobChipPlan = failed ? { tone: "err", glyph: "✕", text: `${plural(failed, "job")} failed` }
+    : running ? { tone: "run", glyph: "⟳", text: `${running} in background` }
+    : lost ? { tone: "warn", glyph: "!", text: `${plural(lost, "job")} lost` }
+    : { tone: "ok", glyph: "✓", text: `${plural(jobs.length, "job")} done` };
+  return {
+    heading: "Background",
+    count: running ? `${running} running` : `${jobs.length} finished`,
+    rows,
+    more: left.length ? `+${left.length} more${left.length === 1 ? ` · ${jobName(left[0])}` : ""}` : null,
+    chip,
+    running,
+  };
+}
+
 export type StatusPlan = {
   signal: Tone;
   label: Verdict["label"];
@@ -129,22 +208,31 @@ export type StatusPlan = {
   run: string;
   /** Line 2: the lead (needs-you) first, then facts. */
   lead: string | null;
+  /** hot for "needs you", run for "Waiting on 2 background jobs" */
+  leadSignal: "hot" | "run";
   facts: { text: string; signal?: Tone }[];
   flags: FlagPlan[];
   dim: boolean;
   /** The Now row, or null when the agent has been quiet for 10 minutes. */
   activity: ActivityPlan | null;
+  /** The Background rows under it, or null when the agent has no job to show. */
+  background: BackgroundPlan | null;
 };
 
-export function statusPlan(view: Pick<CanvasView, "tree" | "runState" | "updatedAt" | "callsNow" | "callsAtUpdate" | "currentTool" | "lastActivityAt" | "activity" | "recent">, now: number, runOverride?: CanvasView["runState"]): StatusPlan {
+export function statusPlan(view: Pick<CanvasView, "tree" | "runState" | "updatedAt" | "callsNow" | "callsAtUpdate" | "currentTool" | "lastActivityAt" | "activity" | "recent" | "background">, now: number, runOverride?: CanvasView["runState"], jobCap: number = BG_CAP.wide): StatusPlan {
   const run = runOverride ?? view.runState;
+  const jobs = visibleJobs({ background: view.background, runState: run }, now);
+  const bg = bgFacts(jobs, run, now);
   const calls = Math.max(0, view.callsNow - view.callsAtUpdate);
-  const verdict = checkHonesty(view.tree, { runState: run, canvasUpdatedAt: view.updatedAt, toolCallsSinceUpdate: calls, now });
+  const verdict = checkHonesty(view.tree, { runState: run, canvasUpdatedAt: view.updatedAt, toolCallsSinceUpdate: calls, now, background: bg });
   const asks = summarize(view.tree).openAsks;
   const facts: StatusPlan["facts"] = [];
   const activity = activityPlan(view, now);
   // the Now row says what is running; the old one-line fact stays only for a view that carries no structured activity
   if (view.currentTool && !view.activity) facts.push({ text: `running ${oneLine(view.currentTool)}`, signal: "run" });
+  // a job that finished while the agent was idle and has not woken it yet
+  const fin = run === "idle" ? jobs.filter((j) => j.state === "done" && j.endedAt != null && j.endedAt > view.lastActivityAt).sort((a, b) => b.endedAt! - a.endedAt!)[0] : undefined;
+  if (fin) facts.unshift({ text: `Background job finished ${ago(now - fin.endedAt!)} ago · agent will pick it up` });
   facts.push({ text: `active ${ago(now - view.lastActivityAt)} ago` });
   facts.push({ text: view.updatedAt == null ? "canvas never written (auto canvas)" : `canvas updated ${ago(now - view.updatedAt)} ago` });
   facts.push({ text: `${calls} tool call${calls === 1 ? "" : "s"} since` });
@@ -152,11 +240,13 @@ export function statusPlan(view: Pick<CanvasView, "tree" | "runState" | "updated
     signal: signalFor(verdict.label),
     label: verdict.label,
     run: `Paseo: ${run}`,
-    lead: verdict.needsYou ? (asks > 1 ? `Waiting on ${asks} answers` : "Waiting for your answer") : null,
+    lead: verdict.needsYou ? (asks > 1 ? `Waiting on ${asks} answers` : "Waiting for your answer") : verdict.waitingOn > 0 ? `Waiting on ${plural(verdict.waitingOn, "background job")}` : null,
     facts,
+    leadSignal: verdict.needsYou ? "hot" : "run",
     flags: visibleFlags(verdict.flags).map((f) => ({ signal: flagSignal(f), glyph: FLAG_GLYPH[flagSignal(f)], text: f.text })),
     dim: verdict.dim,
     activity,
+    background: backgroundPlan({ background: view.background, runState: run }, now, jobCap),
   };
 }
 
@@ -167,7 +257,7 @@ export function selfStatus(view: Pick<CanvasView, "tree" | "auto">, label: Verdi
   return { text: status, contradicted: status === "done" && (label === "Disputed" || label === "Stale") };
 }
 
-export type RowPlan = { agentId: string; title: string; signal: Tone; label: string; ticks: StepState[]; bluf: string; meta: string; needsYou: boolean; flag: FlagPlan | null; dim: boolean };
+export type RowPlan = { agentId: string; title: string; signal: Tone; label: string; ticks: StepState[]; bluf: string; meta: string; needsYou: boolean; flag: FlagPlan | null; dim: boolean; /** "2 in background", the compact form of the Background rows */ jobs: JobChipPlan | null };
 /** One agent as a row in the Canvases list (native screen and browser index). */
 export function rowPlan(view: CanvasView, now: number): RowPlan {
   const st = pillState(view, now);
@@ -182,6 +272,7 @@ export function rowPlan(view: CanvasView, now: number): RowPlan {
     ticks: steps,
     bluf: bluf?.text ?? "",
     meta: `${view.auto ? "auto canvas" : "agent canvas"} · ${view.runState}`,
+    jobs: backgroundPlan(view, now)?.chip ?? null,
     needsYou: st.verdict.needsYou,
     flag: sp.flags[0] ?? null,
     dim: sp.dim,

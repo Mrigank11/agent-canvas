@@ -1,7 +1,7 @@
 // The browser's primitives: the same set as client/ui/atoms.tsx, as string functions, plus the CSS custom
 // properties generated from shared/ui-spec.ts. No colour is written by hand in the component CSS: it only uses var(--…).
 import type { StepState } from "../shared/canvas.ts";
-import type { ActivityPlan, FlagPlan, StatusPlan } from "../shared/plan.ts";
+import type { ActivityPlan, BackgroundPlan, FlagPlan, JobChipPlan, JobRowPlan, StatusPlan } from "../shared/plan.ts";
 import { ACTIVITY_ICONS, BASE, SIGNAL, STEP_GLYPH, TONES, tokensFixed, type Delta, type Tone } from "../shared/ui-spec.ts";
 
 export const esc = (s: unknown) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -26,8 +26,9 @@ export { BASE, SIGNAL };
 // ---------- primitives ----------
 
 /** StatusDot. Halo and pulse come from the signal spec. */
-export const sd = (tone: Tone, o: { halo?: boolean; pulse?: boolean; size?: number } = {}) => {
+export const sd = (tone: Tone, o: { halo?: boolean; pulse?: boolean; size?: number; spin?: boolean } = {}) => {
   const s = SIGNAL[tone];
+  if (o.spin) return `<span class="sd spin ${tone}"${o.size ? ` style="width:${o.size}px;height:${o.size}px"` : ""}></span>`;
   const cls = ["sd", tone, o.halo === false || !s.halo ? "nohalo" : "", o.pulse === false || !s.pulse ? "nopulse" : ""].join(" ");
   return `<span class="${cls}"${o.size ? ` style="width:${o.size}px;height:${o.size}px"` : ""}></span>`;
 };
@@ -78,11 +79,35 @@ export function activityRow(a: ActivityPlan): string {
   return `<details class="nowd" data-k="now"><summary class="${cls}">${head}<span class="caret">›</span></summary><div class="nowx">${well}${trail}</div></details>`;
 }
 
+/**
+ * One Background row: the Now row's grammar with a spinner and timer while running, a quiet check and the exit code once done,
+ * and the one red-tinted row for a failure. A <details> so a tap shows the full command and the last Monitor event.
+ */
+export function jobRow(r: JobRowPlan): string {
+  const tail = r.state === "running" ? sd("run", { spin: true, size: 14 }) : "";
+  const head = `<span class="tg ${r.tone}">${icon(r.icon)}</span><span class="nt"><span class="nl">${esc(r.label)}</span>${r.target ? `<span class="mchip">${esc(r.target)}</span>` : ""}</span>${r.extra ? `<span class="jx">${esc(r.extra)}</span>` : ""}${tail}<span class="el ${r.tone}">${esc(r.elapsed)}</span>`;
+  const cls = `now job ${r.tone}`;
+  if (!r.full && !r.lastEvent) return `<div class="${cls}">${head}</div>`;
+  const well = r.full ? `<div class="well">${r.full.split("\n").map((l) => `<span>${esc(l || " ")}</span>`).join("")}</div>` : "";
+  const ev = r.lastEvent ? `<div class="meta">Last event: ${esc(r.lastEvent)}</div>` : "";
+  return `<details class="nowd" data-k="job-${esc(r.id)}"><summary class="${cls}">${head}<span class="caret">›</span></summary><div class="nowx">${well}${ev}</div></details>`;
+}
+/** B's compact form: one tinted chip for the timeline card and the Canvases list. */
+export const jobChip = (c: JobChipPlan) => `<span class="chip ${c.tone} jobchip">${esc(c.glyph)} ${esc(c.text)}</span>`;
+/** The Background group. On a phone the third row folds into "+n more" (CSS), so rows stay single-line. */
+export function backgroundGroup(b: BackgroundPlan): string {
+  const rows = b.rows.map((r, i) => `<div class="jr j${i + 1}">${jobRow(r)}</div>`).join("");
+  const more = b.more ? `<div class="meta jmore">${esc(b.more)}</div>` : "";
+  // a third row hidden on a narrow screen is one more job behind the "+n more"
+  const phone = b.rows.length > 2 ? `<div class="meta jmore jphone">+${(b.more ? Number(/\+(\d+)/.exec(b.more)?.[1] ?? 0) : 0) + b.rows.length - 2} more</div>` : "";
+  return `<div class="bg">${slabel(b.heading, { count: b.count })}${rows}${more}${phone}</div>`;
+}
+
 /** Paseo's own line. Facts are Paseo's; the agent cannot write into it. */
 export function statusLine(p: StatusPlan): string {
   const facts = p.facts.map((f) => `<span${f.signal ? ` class="c-${f.signal}"` : ""}>${esc(f.text)}</span>`);
-  const l2 = [...(p.lead ? [`<b class="c-hot">${esc(p.lead)}</b>`] : []), ...facts].join('<span class="sep"> · </span>');
-  return `<div class="statusline"><div class="l1">${badge(p.signal, p.label, p.signal === "ok" ? "check" : "dot")}${meta(p.run)}</div>${p.activity ? activityRow(p.activity) : ""}<div class="meta l2">${l2}</div>${p.flags.map(flagLine).join("")}</div>`;
+  const l2 = [...(p.lead ? [`<b class="c-${p.leadSignal}">${esc(p.lead)}</b>`] : []), ...facts].join('<span class="sep"> · </span>');
+  return `<div class="statusline"><div class="l1">${badge(p.signal, p.label, p.signal === "ok" ? "check" : "dot")}${meta(p.run)}</div>${p.activity ? activityRow(p.activity) : ""}${p.background ? backgroundGroup(p.background) : ""}<div class="meta l2">${l2}</div>${p.flags.map(flagLine).join("")}</div>`;
 }
 
 // ---------- component CSS (var(--…) only) ----------
@@ -143,6 +168,13 @@ a{color:var(--run-t);text-decoration:none}a:hover{text-decoration:underline}
 .gc.solid.run{background:var(--run);color:var(--bg)}.gc.solid.warn{background:var(--warn);color:var(--bg)}.gc.solid.err{background:var(--err);color:var(--bg)}.gc.solid.ok{background:var(--ok);color:var(--bg)}
 .chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;font-size:13px;font-weight:500;align-self:flex-start}.chip.ok{background:var(--ok-w);color:var(--ok-t)}
 .divider{height:1px;background:var(--line)}
+.sd.spin{background:none;box-shadow:none;border:2px solid transparent;border-radius:50%;box-sizing:border-box;animation:spin .9s linear infinite}.sd.spin.run{border-color:var(--run-w);border-top-color:var(--run)}
+@keyframes spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.sd.spin{animation:none;border-top-color:var(--run);border-right-color:var(--run)}}
+.bg{display:flex;flex-direction:column;gap:2px;padding-top:2px}.jr{display:block}.jx{font-size:12px;color:var(--muted);white-space:nowrap;flex:none}.jmore{padding-left:0}.jphone{display:none}
+.now.job.ok .tg,.tg.ok{background:var(--ok-w);color:var(--ok-t)}.tg.err{background:var(--err-w);color:var(--err-t)}.el.ok{color:var(--ok-t)}.el.err{color:var(--err-t)}
+.now.job.err{background:var(--err-w)}details[open]>.now.job.err,details .now.job.err:hover{background:var(--err-w)}
+.chip.run{background:var(--run-w);color:var(--run-t)}.chip.err{background:var(--err-w);color:var(--err-t)}.chip.warn{background:var(--warn-w);color:var(--warn-t)}.jobchip{height:20px;font-size:12px}
+@media (max-width:480px){.jr.j3{display:none}.jmore:not(.jphone){display:none}.jphone{display:block}}
 .nowd>summary{list-style:none}.nowd>summary::-webkit-details-marker{display:none}
 .now{display:flex;align-items:center;gap:10px;min-height:32px;padding:4px 8px;margin:0 -8px;border-radius:8px}
 details .now{cursor:pointer}details .now:hover,details[open]>.now{background:var(--raised)}
@@ -161,6 +193,6 @@ details .now{cursor:pointer}details .now:hover,details[open]>.now{background:var
 .tdot{width:8px;height:8px;border-radius:4px;flex:none}.trail .ok .tdot{background:var(--ok-w);box-shadow:inset 0 0 0 1.5px var(--ok)}.trail .err{color:var(--err-t)}.trail .err .tdot{background:var(--err)}
 .list .row{display:flex;flex-direction:column;gap:4px;padding:14px 12px;margin:0 -12px;border-radius:8px;border-bottom:1px solid var(--line);color:inherit;text-decoration:none}.list .row:last-child{border-bottom:0}.list .row:hover{background:var(--raised);text-decoration:none}
 .list .row.need{background:var(--hot-w);border-bottom-color:transparent}.list .row.dim{opacity:.55}
-.list .row .l1{display:flex;align-items:center;gap:10px}.list .row .l1 b{font-weight:600;min-width:0}.list .row .sp{flex:1}.list .row .ind{padding-left:18px}.list .row .bl{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.list .row.need .bl{color:var(--fg)}
+.list .row .ind:has(.jobchip){display:flex;align-items:center;gap:8px}.list .row .l1{display:flex;align-items:center;gap:10px}.list .row .l1 b{font-weight:600;min-width:0}.list .row .sp{flex:1}.list .row .ind{padding-left:18px}.list .row .bl{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.list .row.need .bl{color:var(--fg)}
 .canvas.dim .dimmable{opacity:.55}
 `;

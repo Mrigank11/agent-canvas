@@ -4,9 +4,9 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { autoCanvas, type AutoItem } from "../shared/auto.ts";
-import { classifyActivity, oneLine, type ActivityCall, type RecentCall } from "../shared/ui-spec.ts";
+import { BG_MONITOR_STARTED, BG_SHELL_STARTED, classifyActivity, oneLine, parseExitCode, type ActivityCall, type RecentCall } from "../shared/ui-spec.ts";
 import { findNode, parseCanvas, patchCanvas, serialize, walk, type Node, type PatchOp } from "../shared/canvas.ts";
-import { REANCHOR_AFTER, ROW_ID, ROW_KIND, ROW_VERSION, type CanvasView } from "../shared/contract.ts";
+import { REANCHOR_AFTER, ROW_ID, ROW_KIND, ROW_VERSION, type BgJob, type CanvasView } from "../shared/contract.ts";
 import type { RunState } from "../shared/honesty.ts";
 import { LABEL_KEY, firstOverride, parseOverride, resolveCanvas, type CanvasPolicy, type Override, type Resolved } from "../shared/config.ts";
 
@@ -18,7 +18,7 @@ type Item = Page["entries"][number]["item"];
 /** What the agent wrote and when. */
 type Authored = { source: Node; updatedAt: number; callsAtUpdate: number };
 /** What Paseo says. */
-type Live = { activity: ActivityCall | null; recent: RecentCall[]; seenRunning: Map<string, number>; seenDone: Map<string, number>; loaded: boolean; title: string | null; workspaceId: string | null; runState: RunState; callIds: Set<string>; items: AutoItem[]; currentTool: string | null; lastActivityAt: number; seq: number };
+type Live = { activity: ActivityCall | null; recent: RecentCall[]; seenRunning: Map<string, number>; seenDone: Map<string, number>; /** background jobs by the launching call's id */ bg: Map<string, BgJob>; /** call ids already read as a possible job start, and notifications already counted */ bgChecked: Set<string>; bgNotes: Set<string>; loaded: boolean; title: string | null; workspaceId: string | null; runState: RunState; callIds: Set<string>; items: AutoItem[]; currentTool: string | null; lastActivityAt: number; seq: number };
 
 export type HubOptions = { log: (m: string) => void; stateFile: string | null; publicBase: string; localBase: string; agentLink?: (agentId: string) => string | null;
   /** The current host-wide settings. */
@@ -43,6 +43,40 @@ function toolLabel(c: Extract<Item, { type: "tool_call" }>): { label: string; fi
 }
 
 const MAX_COMMAND = 4000;
+type ToolCall = Extract<Item, { type: "tool_call" }>;
+const isTaskNotification = (c: ToolCall) => /^task_?notification$/i.test(c.name.replace(/\s+/g, "_"));
+const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
+
+/** The text a finished call returned, whatever shape its detail has. */
+function resultText(c: ToolCall): string {
+  const d = c.detail;
+  if (d.type === "shell") return d.output ?? "";
+  if (d.type === "plain_text") return d.text ?? d.label ?? "";
+  if (d.type === "unknown") return typeof d.output === "string" ? d.output : JSON.stringify(d.output ?? "");
+  return "";
+}
+
+/** Read a launching call as the start of a background job (Claude Code's wording), or null. */
+export function parseJobStart(c: ToolCall): Pick<BgJob, "id" | "kind" | "command" | "description" | "expires"> | null {
+  if (c.status === "running" || isTaskNotification(c)) return null;
+  const text = resultText(c);
+  const input = c.detail.type === "unknown" && c.detail.input && typeof c.detail.input === "object" && !Array.isArray(c.detail.input) ? (c.detail.input as Record<string, unknown>) : {};
+  const mon = BG_MONITOR_STARTED.exec(text);
+  if (mon) return { id: mon[1], kind: "monitor", command: (str(input.command) ?? "").slice(0, MAX_COMMAND), description: str(input.description), expires: mon[2]?.trim() || undefined };
+  const sh = BG_SHELL_STARTED.exec(text);
+  if (sh) return { id: sh[1], kind: "shell", command: (c.detail.type === "shell" ? c.detail.command : str(input.command) ?? "").slice(0, MAX_COMMAND), description: str(input.description) };
+  return null;
+}
+
+/** What a task notification says, from the summary text and the synthetic item's metadata. */
+export function parseNotification(c: ToolCall): { taskId?: string; toolUseId?: string; status?: string; summary: string; event?: string } {
+  const md = (c.metadata ?? {}) as Record<string, unknown>;
+  const d = c.detail;
+  const summary = d.type === "plain_text" ? d.label ?? "" : "";
+  const raw = d.type === "plain_text" ? d.text ?? "" : "";
+  return { taskId: str(md.taskId), toolUseId: str(md.toolUseId), status: str(md.status)?.toLowerCase(), summary, event: /<event>\s*([\s\S]*?)\s*<\/event>/i.exec(raw)?.[1] };
+}
+
 /** A tool call as the Now row wants it: kind and the raw fields, not a flattened label. */
 export function rawCall(c: Extract<Item, { type: "tool_call" }>): Omit<ActivityCall, "startedAt"> & { exitCode?: number | null } {
   const d = c.detail;
@@ -299,7 +333,7 @@ export class Hub {
   private callCount(agentId: string) { return this.live.get(agentId)?.callIds.size ?? 0; }
   private liveFor(agentId: string): Live {
     let l = this.live.get(agentId);
-    if (!l) this.live.set(agentId, (l = { activity: null, recent: [], seenRunning: new Map(), seenDone: new Map(), loaded: false, title: null, workspaceId: null, runState: "idle", callIds: new Set(), items: [], currentTool: null, lastActivityAt: this.now(), seq: 0 }));
+    if (!l) this.live.set(agentId, (l = { activity: null, recent: [], seenRunning: new Map(), seenDone: new Map(), bg: new Map(), bgChecked: new Set(), bgNotes: new Set(), loaded: false, title: null, workspaceId: null, runState: "idle", callIds: new Set(), items: [], currentTool: null, lastActivityAt: this.now(), seq: 0 }));
     return l;
   }
 
@@ -376,6 +410,7 @@ export class Hub {
     const first = !l.loaded;
     l.loaded = true;
     const t = this.now();
+    this.trackBackground(l, items, first, t);
     for (const c of calls) {
       if (c.status === "running") { if (!l.seenRunning.has(c.callId)) l.seenRunning.set(c.callId, t); }
       else if (!l.seenDone.has(c.callId)) l.seenDone.set(c.callId, first ? l.lastActivityAt : t);
@@ -394,11 +429,60 @@ export class Hub {
     if (l.seenDone.size > 400) for (const k of [...l.seenDone.keys()].slice(0, 200)) l.seenDone.delete(k);
   }
 
+  /**
+   * Background jobs, for Claude Code agents. A job opens on the launching call's result text, closes on the task
+   * notification whose toolUseId is that call's id, and a Monitor event is a notification with no status. Timeline items carry no
+   * time, so start and end are first-seen stamps (a job already running when the agent is first read is marked approximate).
+   * A notification whose start was not recognised still shows, as a finished job, so a wording change never hides one.
+   */
+  private trackBackground(l: Live, items: readonly Item[], first: boolean, t: number) {
+    const ended = first ? l.lastActivityAt : t;
+    const calls = items.filter((i): i is ToolCall => i.type === "tool_call");
+    for (const c of calls) {
+      if (isTaskNotification(c)) continue;
+      if (l.bgChecked.has(c.callId) || c.status === "running") continue;
+      l.bgChecked.add(c.callId);
+      const start = parseJobStart(c);
+      if (start) l.bg.set(c.callId, { ...start, state: "running", startedAt: t, ...(first ? { approx: true } : {}) });
+    }
+    for (const c of calls) {
+      if (!isTaskNotification(c) || l.bgNotes.has(c.callId)) continue;
+      l.bgNotes.add(c.callId);
+      const n = parseNotification(c);
+      const key = (n.toolUseId && l.bg.has(n.toolUseId) ? n.toolUseId : null) ?? [...l.bg].find(([, j]) => n.taskId && j.id === n.taskId)?.[0] ?? null;
+      let job = key ? l.bg.get(key) : undefined;
+      if (!job) {
+        // a finish (or event) without a recognised start: keep it as a job whose start we did not see
+        const isMon = /^Monitor event/i.test(n.summary);
+        job = { id: n.taskId ?? c.callId, kind: isMon ? "monitor" : "shell", command: isMon ? "" : /Background command "([\s\S]*?)" (?:completed|failed|was stopped|has been)/.exec(n.summary)?.[1]?.slice(0, MAX_COMMAND) ?? "", description: isMon ? /Monitor event: "([\s\S]*?)"/.exec(n.summary)?.[1] : undefined, state: "running", startedAt: t, approx: true, unrecognised: true };
+        l.bg.set(n.toolUseId ?? `note:${c.callId}`, job);
+      }
+      if (job.state !== "running") continue;
+      const status = n.status;
+      const expiry = job.kind === "monitor" && !status && !/^Monitor event/i.test(n.summary) && /\b(expired|ended|timed out|stopped)\b/i.test(n.summary);
+      if (job.kind === "monitor" && !status && !expiry) {
+        job.events = (job.events ?? 0) + 1;
+        job.lastEvent = oneLine(n.event ?? n.summary, 160);
+        continue;
+      }
+      const code = parseExitCode(n.summary);
+      const state: BgJob["state"] = status === "failed" || status === "error" ? "failed" : status && /^(killed|stopped|cancel+ed)$/.test(status) ? "killed" : code != null && code !== 0 ? "failed" : "done";
+      job.state = state;
+      job.endedAt = ended;
+      if (code != null) job.exitCode = code;
+    }
+    if (l.runState === "error" || l.runState === "closed") for (const j of l.bg.values()) if (j.state === "running") { j.state = "lost"; j.endedAt = t; }
+    // bounded
+    if (l.bg.size > 60) for (const [k, j] of [...l.bg]) if (j.state !== "running" && l.bg.size > 40) l.bg.delete(k);
+    if (l.bgChecked.size > 600) for (const k of [...l.bgChecked].slice(0, 300)) l.bgChecked.delete(k);
+    if (l.bgNotes.size > 600) for (const k of [...l.bgNotes].slice(0, 300)) l.bgNotes.delete(k);
+  }
+
   private async tick() {
     for (const [id, l] of this.live) {
       // Running agents every tick; a recently-active or errored one a few more times so the final state lands.
       if (!this.resolved(id).show) continue;
-      if (l.runState === "running" || l.runState === "initializing" || this.now() - l.lastActivityAt < 15_000) await this.refresh(id);
+      if (l.runState === "running" || l.runState === "initializing" || this.now() - l.lastActivityAt < 15_000 || [...l.bg.values()].some((j) => j.state === "running")) await this.refresh(id); // an idle agent waiting on a job is the one that must be watched
     }
   }
 
@@ -429,6 +513,7 @@ export class Hub {
       currentTool: l.currentTool,
       activity: l.activity,
       recent: l.recent,
+      background: [...l.bg.values()].map((j) => ({ ...j })),
       lastActivityAt: l.lastActivityAt,
       url: `${this.o.publicBase}/a/${agentId}`,
       agentUrl: this.o.agentLink?.(agentId) ?? null,

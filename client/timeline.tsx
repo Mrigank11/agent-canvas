@@ -5,7 +5,7 @@ import { planBlocks, statusPlan } from "../shared/plan";
 import type { rowData } from "../shared/contract";
 import { AskPanel } from "./blocks";
 import { CanvasProvider, openUrl, useNow } from "./common";
-import { Button, Meta, ProgressTicks, StatusBadge, StatusDot, Txt } from "./ui/atoms";
+import { Button, JobChip, Meta, ProgressTicks, StatusBadge, StatusDot, Txt } from "./ui/atoms";
 import { UiRoot, useT } from "./ui/tokens";
 
 /**
@@ -47,6 +47,7 @@ function Card({ view }: { view: Exclude<z.output<typeof rowData>, { superseded: 
         ) : null}
         <View style={{ marginLeft: "auto" }}><Button variant="ghost" label="Browser ↗" onPress={() => openUrl(view.url)} /></View>
       </View>
+      {plan.background ? <View style={{ flexDirection: "row" }}><JobChip chip={plan.background.chip} /></View> : null}
       {bluf?.kind === "bluf" ? <Txt numberOfLines={2}>{bluf.text}</Txt> : null}
       {active ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>

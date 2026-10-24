@@ -1,9 +1,9 @@
 import { useAgent } from "@getpaseo/plugin/client";
-import { View } from "react-native";
+import { View, useWindowDimensions } from "react-native";
 import type { RunState } from "../shared/honesty";
 import type { CanvasView } from "../shared/contract";
 import { selfStatus, statusPlan, type StatusPlan } from "../shared/plan";
-import { SPACE } from "../shared/ui-spec";
+import { BG_CAP, SPACE } from "../shared/ui-spec";
 import { Blocks } from "./blocks";
 import { useNow } from "./common";
 import { Hairline, Sheet, StatusLine, Txt } from "./ui/atoms";
@@ -18,7 +18,9 @@ export function useLiveAgent(agentId: string): Live {
 /** The facts: Paseo's live snapshot where the host offers one (panels), else what the daemon last saw (about 2 s old). */
 export function useStatus(view: CanvasView, live: Live = null): { plan: StatusPlan; now: number } {
   const now = useNow();
-  const plan = statusPlan({ ...view, lastActivityAt: live?.at || view.lastActivityAt }, now, live?.status ?? view.runState);
+  const { width } = useWindowDimensions();
+  // on a phone the Background group folds to two rows and "+n more"
+  const plan = statusPlan({ ...view, lastActivityAt: live?.at || view.lastActivityAt }, now, live?.status ?? view.runState, width < 420 ? BG_CAP.phone : BG_CAP.wide);
   return { plan, now };
 }
 

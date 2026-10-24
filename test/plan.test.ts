@@ -23,7 +23,7 @@ export const SHOWCASE = `<Canvas title="Block showcase" status="working">
 </Canvas>`;
 
 export const showcaseTree = () => { const r = parseCanvas(SHOWCASE); assert.ok(r.ok); return r.ok ? r.root : (null as never); };
-export const viewOf = (tree = showcaseTree(), o: Partial<CanvasView> = {}): CanvasView => ({ agentId: "a1", workspaceId: "w1", title: "Block showcase", tree, auto: false, updatedAt: 1000, callsAtUpdate: 0, callsNow: 0, runState: "running", currentTool: null, activity: null, recent: [], lastActivityAt: 1000, url: "http://x/a/a1", agentUrl: null, ...o });
+export const viewOf = (tree = showcaseTree(), o: Partial<CanvasView> = {}): CanvasView => ({ agentId: "a1", workspaceId: "w1", title: "Block showcase", tree, auto: false, updatedAt: 1000, callsAtUpdate: 0, callsNow: 0, runState: "running", currentTool: null, background: [], activity: null, recent: [], lastActivityAt: 1000, url: "http://x/a/a1", agentUrl: null, ...o });
 
 test("a canvas plans to one entry per block, with runs of metrics merged", () => {
   const plans = planBlocks(showcaseTree());

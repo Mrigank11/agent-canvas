@@ -8,7 +8,7 @@ import { rowPlan, type RowPlan } from "../shared/plan";
 import { SPACE } from "../shared/ui-spec";
 import { CanvasBody, useLiveAgent } from "./canvas";
 import { CanvasProvider, openUrl, useNow, useViews } from "./common";
-import { Button, FlagLine, Meta, ProgressTicks, Segmented, StatusBadge, StatusDot, Txt } from "./ui/atoms";
+import { Button, FlagLine, JobChip, Meta, ProgressTicks, Segmented, StatusBadge, StatusDot, Txt } from "./ui/atoms";
 import { UiRoot, useT, type Theme } from "./ui/tokens";
 import { useFocusedAgent } from "./store";
 
@@ -29,7 +29,10 @@ function CanvasRow({ plan, onOpen, last }: { plan: RowPlan; onOpen: () => void; 
       </View>
       {plan.bluf ? <View style={{ paddingLeft: 18 }}><Txt c={hot ? "fg" : "muted"} numberOfLines={1}>{plan.bluf}</Txt></View> : null}
       <View style={{ paddingLeft: 18, gap: 4 }}>
-        <Meta>{plan.meta}</Meta>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <Meta>{plan.meta}</Meta>
+          {plan.jobs ? <JobChip chip={plan.jobs} /> : null}
+        </View>
         {plan.flag ? <FlagLine flag={plan.flag} /> : null}
       </View>
     </Pressable>

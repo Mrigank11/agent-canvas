@@ -10,6 +10,28 @@ export const REANCHOR_AFTER = 6;
 
 const nodeSchema = z.custom<Node>((v) => typeof v === "object" && v !== null && typeof (v as Node).tag === "string" && Array.isArray((v as Node).children));
 
+/** A background job the agent started and is waiting on (Claude Code only). Times are the hub's first-seen stamps. */
+export const bgJob = z.object({
+  /** Claude's task id, or the launching call's id for a job whose start was not recognised. */
+  id: z.string(),
+  kind: z.enum(["shell", "monitor", "subagent"]),
+  command: z.string(),
+  description: z.string().optional(),
+  state: z.enum(["running", "done", "failed", "killed", "lost"]),
+  exitCode: z.number().nullable().optional(),
+  startedAt: z.number(),
+  /** The job was already running when the plugin first looked: its age is a lower bound ("≥ 3m"). */
+  approx: z.boolean().optional(),
+  /** Only the end was seen (the start wording was not recognised). */
+  unrecognised: z.boolean().optional(),
+  endedAt: z.number().optional(),
+  /** Monitor: the last event line, how many have come, and when the watch expires ("28m"). */
+  lastEvent: z.string().optional(),
+  events: z.number().optional(),
+  expires: z.string().optional(),
+});
+export type BgJob = z.output<typeof bgJob>;
+
 /** One agent's canvas as the renderers see it. The same value is the timeline row data and the RPC output. */
 export const canvasView = z.object({
   agentId: z.string(),
@@ -29,6 +51,8 @@ export const canvasView = z.object({
   activity: z.object({ kind: z.enum(["shell", "edit", "write", "read", "search", "fetch", "other"]), name: z.string(), command: z.string().optional(), path: z.string().optional(), url: z.string().optional(), query: z.string().optional(), startedAt: z.number() }).nullable().default(null),
   /** The last three finished actions (newest first), as past-tense labels. Canvas bookkeeping is left out. */
   recent: z.array(z.object({ kind: z.enum(["shell", "edit", "write", "read", "search", "fetch", "other"]), label: z.string(), ok: z.boolean(), exitCode: z.number().nullable().optional(), endedAt: z.number() })).max(3).default([]),
+  /** The background jobs the agent is waiting on, running first, then recently finished. Empty for providers that have none. */
+  background: z.array(bgJob).default([]),
   /** The tool the agent is running right now, from Paseo's timeline (not from the canvas). One short line; kept for older clients. */
   currentTool: z.string().nullable(),
   /** ms epoch of the agent's last activity as Paseo reports it. */

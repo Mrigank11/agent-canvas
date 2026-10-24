@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { AccessibilityInfo, Animated, Pressable, ScrollView, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import type { StepState } from "../../shared/canvas";
-import type { ActivityPlan, FlagPlan, StatusPlan } from "../../shared/plan";
+import type { ActivityPlan, BackgroundPlan, FlagPlan, JobChipPlan, JobRowPlan, StatusPlan } from "../../shared/plan";
 import { FLAG_GLYPH, RADIUS, STEP_GLYPH, stepSignal, type Delta, type Tone } from "../../shared/ui-spec";
 import { ink, typeStyle, useT, type Ink } from "./tokens";
 
@@ -39,6 +39,22 @@ export function StatusDot({ tone, size = 8, halo, pulse }: { tone: Tone; size?: 
       <View style={dot} />
     </Animated.View>
   );
+}
+
+/** A spinning ring for a running job: an arc in the run colour that turns. Still (a three-quarter ring) under reduced motion. */
+export function Spinner({ size = 14 }: { size?: number }) {
+  const t = useT();
+  const s = t.sig("run");
+  const reduced = useReducedMotion();
+  const r = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (reduced) { r.setValue(0); return; }
+    const loop = Animated.loop(Animated.timing(r, { toValue: 1, duration: 900, easing: (x) => x, useNativeDriver: true }));
+    loop.start();
+    return () => loop.stop();
+  }, [reduced, r]);
+  const spin = r.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+  return <Animated.View accessibilityLabel="running" style={{ width: size, height: size, borderRadius: size, borderWidth: 2, borderColor: s.tint, borderTopColor: s.dot, ...(reduced ? { borderRightColor: s.dot } : null), transform: [{ rotate: spin }] }} />;
 }
 
 /** Tinted, borderless badge: the one place a verdict is spelled out. */
@@ -220,7 +236,65 @@ export function MonoChip({ text }: { text: string }) {
  * The Now row: what the agent is doing this second. Icon, humanised label, the target as a muted mono chip and a ticking
  * elapsed time. Tap it for the full command and the last three actions. Quiet "Last: …" when nothing is running.
  */
-export function ActivityRow({ plan }: { plan: ActivityPlan }) {
+export function ActivityRow(props: { plan: ActivityPlan; variant?: "now" } | { plan: JobRowPlan; variant: "job" }) {
+  return props.variant === "job" ? <JobRow plan={props.plan} /> : <NowRow plan={props.plan} />;
+}
+
+/** variant="job": the same row for one background job. A spinner and timer while it runs, a quiet check and the exit code when done, the one red-tinted row on failure. */
+function JobRow({ plan }: { plan: JobRowPlan }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const expandable = !!plan.full || !!plan.lastEvent;
+  const s = t.sig(plan.tone);
+  const row = (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 32, paddingVertical: 4, paddingHorizontal: 8, marginHorizontal: -8, borderRadius: RADIUS.control, backgroundColor: plan.tone === "err" ? s.tint : open ? t.raised : "transparent" }}>
+      <View style={{ width: 24, height: 24, borderRadius: RADIUS.chip, alignItems: "center", justifyContent: "center", backgroundColor: plan.tone === "idle" ? t.well : s.tint }}>
+        <Icon name={plan.icon} size={14} color={plan.tone === "idle" ? t.muted : s.text} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Txt role="body" weight={plan.state === "running" ? "500" : "400"} c={plan.tone === "idle" ? "muted" : plan.state === "running" ? "fg" : plan.tone === "err" ? "err" : "muted"} numberOfLines={1} style={{ lineHeight: 18 }}>{plan.label}</Txt>
+        {plan.target ? <MonoChip text={plan.target} /> : null}
+      </View>
+      {plan.extra ? <Txt role="meta" c="muted">{plan.extra}</Txt> : null}
+      {plan.state === "running" ? <Spinner /> : null}
+      <Txt role="label" c={plan.tone === "run" ? "run" : plan.tone === "err" ? "err" : plan.tone === "ok" ? "ok" : "faint"}>{plan.elapsed}</Txt>
+      {expandable ? <Text style={{ color: t.faint, fontSize: 16, lineHeight: 16, width: 10, textAlign: "center", transform: [{ rotate: open ? "90deg" : "0deg" }] }}>›</Text> : null}
+    </View>
+  );
+  return (
+    <View>
+      {expandable ? <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`${plan.label}, ${plan.elapsed}`} onPress={() => setOpen(!open)}>{row}</Pressable> : row}
+      {open ? (
+        <View style={{ gap: 8, paddingTop: 6 }}>
+          {plan.full ? <Well><ScrollView style={{ maxHeight: 8 * 17 + 4 }} nestedScrollEnabled>{plan.full.split("\n").map((l, i) => <Text key={i} style={[typeStyle("mono"), { fontSize: 11.5, lineHeight: 17, color: t.fg, paddingHorizontal: 12 }]}>{l || " "}</Text>)}</ScrollView></Well> : null}
+          {plan.lastEvent ? <Meta>Last event: {plan.lastEvent}</Meta> : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** The Background group: a label with the running count, one row per job, and "+n more" past the cap. */
+export function JobGroup({ plan }: { plan: BackgroundPlan }) {
+  return (
+    <View style={{ gap: 2, paddingTop: 2 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Txt role="label" c="muted">{plan.heading}</Txt>
+        <View style={{ flex: 1 }} />
+        <Txt role="label" c={plan.running ? "run" : "faint"}>{plan.count}</Txt>
+      </View>
+      {plan.rows.map((r) => <ActivityRow key={r.id} plan={r} variant="job" />)}
+      {plan.more ? <Meta>{plan.more}</Meta> : null}
+    </View>
+  );
+}
+
+/** B's compact form of the same jobs: one tinted chip. */
+export function JobChip({ chip }: { chip: JobChipPlan }) {
+  return <Chip tone={chip.tone} glyph={chip.glyph} text={chip.text} />;
+}
+
+function NowRow({ plan }: { plan: ActivityPlan }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const expandable = !!plan.full || plan.recent.length > 0;
@@ -274,8 +348,9 @@ export function StatusLine({ plan, hairline = true }: { plan: StatusPlan; hairli
         <Meta>{plan.run}</Meta>
       </View>
       {plan.activity ? <ActivityRow plan={plan.activity} /> : null}
+      {plan.background ? <JobGroup plan={plan.background} /> : null}
       <Text style={typeStyle("meta")}>
-        {plan.lead ? <Text style={{ color: ink(t, "hot"), fontWeight: "500" }}>{plan.lead}{" · "}</Text> : null}
+        {plan.lead ? <Text style={{ color: ink(t, plan.leadSignal), fontWeight: "500" }}>{plan.lead}{" · "}</Text> : null}
         {plan.facts.map((f, i) => (
           <Text key={i} style={{ color: ink(t, f.signal ?? "muted") }}>{i > 0 ? " · " : ""}{f.text}</Text>
         ))}
