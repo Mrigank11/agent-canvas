@@ -1,0 +1,6 @@
+{
+  "id": "agent-canvas",
+  "name": "Agent canvas",
+  "media": [],
+  "requirements": { "paseo": ">=0.12.0 <0.13.0" }
+}

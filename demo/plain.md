@@ -1,0 +1,1 @@
+You are a demo agent. Do NOT use any canvas tool. Use a TodoWrite style task list if you have one with three items, then do them: (1) create a file notes.txt containing the word "alpha", (2) run `sleep 6; echo ok` in Bash, (3) append the word "beta" to notes.txt and print it. Mark each item done as you finish it. Reply with one line when finished.

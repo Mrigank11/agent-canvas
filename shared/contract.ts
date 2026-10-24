@@ -1,0 +1,49 @@
+import { defineRpc } from "@getpaseo/plugin";
+import { z } from "zod";
+import type { Node } from "./canvas.ts";
+
+export const ROW_KIND = "agent-canvas";
+export const ROW_VERSION = 1;
+export const ROW_ID = "canvas";
+/** How many timeline items may pile up under the canvas row before it is moved back to the bottom. */
+export const REANCHOR_AFTER = 6;
+
+const nodeSchema = z.custom<Node>((v) => typeof v === "object" && v !== null && typeof (v as Node).tag === "string" && Array.isArray((v as Node).children));
+
+/** One agent's canvas as the renderers see it. The same value is the timeline row data and the RPC output. */
+export const canvasView = z.object({
+  agentId: z.string(),
+  title: z.string(),
+  tree: nodeSchema,
+  /** True when the agent never wrote a canvas and this one was derived from its timeline. */
+  auto: z.boolean(),
+  /** ms epoch of the agent's last canvas.set/patch; null for an auto canvas. */
+  updatedAt: z.number().nullable(),
+  callsAtUpdate: z.number(),
+  callsNow: z.number(),
+  /** Run state when the server last looked; clients prefer the live value from Paseo. */
+  runState: z.enum(["initializing", "idle", "running", "error", "closed"]),
+  /** The tool the agent is running right now, from Paseo's timeline (not from the canvas). */
+  currentTool: z.string().nullable(),
+  /** ms epoch of the agent's last activity as Paseo reports it. */
+  lastActivityAt: z.number(),
+  /** Where the browser view lives, e.g. http://host:6790/a/<id>. */
+  url: z.string(),
+});
+export type CanvasView = z.output<typeof canvasView>;
+
+/** What a timeline row holds: the canvas, or a stub left where the canvas used to be before it moved down. */
+export const rowData = z.union([canvasView, z.object({ superseded: z.literal(true) })]);
+
+export const listRpc = defineRpc({ name: "canvas.list", input: z.object({}), output: z.object({ views: z.array(canvasView), baseUrl: z.string() }) });
+export const getRpc = defineRpc({ name: "canvas.get", input: z.object({ agentId: z.string() }), output: z.object({ view: canvasView.nullable() }) });
+export const answerRpc = defineRpc({
+  name: "canvas.answer",
+  input: z.object({ agentId: z.string(), askId: z.string(), value: z.string() }),
+  output: z.object({ ok: z.boolean(), error: z.string().optional() }),
+});
+export const enableRpc = defineRpc({
+  name: "canvas.enable",
+  input: z.object({ agentId: z.string() }),
+  output: z.object({ ok: z.boolean(), url: z.string(), error: z.string().optional() }),
+});
