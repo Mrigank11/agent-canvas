@@ -1,13 +1,14 @@
 // The hub owns every agent's canvas and keeps three things in step: what the agent wrote, what Paseo says is
 // true about the agent (run state, tool calls, current tool), and the plugin row drawn in the agent's pane.
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { autoCanvas, type AutoItem } from "../shared/auto.ts";
 import { BG_MONITOR_STARTED, BG_SHELL_STARTED, classifyActivity, oneLine, parseExitCode, type ActivityCall, type RecentCall } from "../shared/ui-spec.ts";
 import { findNode, parseCanvas, patchCanvas, serialize, walk, type Node, type PatchOp } from "../shared/canvas.ts";
 import { REANCHOR_AFTER, ROW_ID, ROW_KIND, ROW_VERSION, type BgJob, type CanvasView } from "../shared/contract.ts";
 import type { RunState } from "../shared/honesty.ts";
+import { Assets } from "./render/assets.ts";
 import { LABEL_KEY, firstOverride, parseOverride, resolveCanvas, type CanvasPolicy, type Override, type Resolved } from "../shared/config.ts";
 
 type PaseoApi = PluginHandlerContext["paseo"];
@@ -127,6 +128,10 @@ export class Hub {
   /** Failed refreshes back off per agent, and are logged once until one succeeds. */
   private fails = new Map<string, { n: number; retryAt: number }>();
   private now: () => number;
+  /** Rich blocks: validation, hashes, the render cache. Lives next to the state file. */
+  readonly assets: Assets;
+  /** Each agent's workspace folder: the only place an <Image> may come from. */
+  private cwds = new Map<string, string>();
 
   private o: HubOptions;
   /** Per-agent overrides by where they came from. The latest explicit one wins: runtime (the pill), then env at creation, then label. */
@@ -144,6 +149,7 @@ export class Hub {
   constructor(o: HubOptions) {
     this.o = o;
     this.now = o.now ?? Date.now;
+    this.assets = new Assets(o.stateFile ? join(dirname(o.stateFile), "cache") : null, this.now);
     this.restore();
   }
 
@@ -202,6 +208,8 @@ export class Hub {
   bind(token: string, agentId: string) {
     if (this.tokens.get(token) === agentId) return;
     this.tokens.set(token, agentId);
+    const was = this.pending.find((p) => p.token === token);
+    if (was?.cwd) this.cwds.set(agentId, was.cwd);
     this.pending = this.pending.filter((p) => p.token !== token);
     this.o.log(`canvas ${token.slice(0, 6)}… bound to agent ${agentId}`);
     this.persist();
@@ -209,6 +217,7 @@ export class Hub {
   /** Fallback when the session-open hook does not carry the token: match a fresh agent by working directory. */
   bindByCwd(agentId: string, cwd: string) {
     if ([...this.tokens.values()].includes(agentId)) return;
+    if (cwd) this.cwds.set(agentId, cwd);
     const hit = [...this.pending].reverse().find((p) => p.cwd === cwd && this.now() - p.at < 120_000);
     if (hit) this.bind(hit.token, agentId);
   }
@@ -276,26 +285,39 @@ export class Hub {
   // ---------- what the agent writes ----------
 
   /** canvas_set: replace the canvas. */
-  set(agentId: string, source: string): { ok: true; ids: string[] } | { ok: false; errors: string[] } {
+  set(agentId: string, source: string): { ok: true; ids: string[]; notes: string[] } | { ok: false; errors: string[] } {
     if (!this.resolved(agentId).tools) return { ok: false, errors: ["the canvas is off for this agent (if it was only just created with canvas=on, wait a few seconds and retry)"] };
     const r = parseCanvas(source);
     if (!r.ok) return { ok: false, errors: r.errors.map((e) => `${e.line ? `line ${e.line}: ` : ""}${e.message}`) };
+    const rich = this.assets.check(r.root, this.cwdOf(agentId));
+    if (!rich.ok) return { ok: false, errors: rich.errors };
     this.authored.set(agentId, { source: r.root, updatedAt: this.now(), callsAtUpdate: this.callCount(agentId) });
     const ids: string[] = [];
     walk(r.root, (n) => ids.push(n.id));
     this.changed(agentId);
-    return { ok: true, ids };
+    return { ok: true, ids, notes: rich.notes };
   }
   /** canvas_patch: atomic. */
-  patch(agentId: string, ops: PatchOp[]): { ok: true } | { ok: false; errors: string[] } {
+  patch(agentId: string, ops: PatchOp[]): { ok: true; notes: string[] } | { ok: false; errors: string[] } {
     if (!this.resolved(agentId).tools) return { ok: false, errors: ["the canvas is off for this agent (if it was only just created with canvas=on, wait a few seconds and retry)"] };
     const cur = this.authored.get(agentId);
     if (!cur) return { ok: false, errors: ["there is no canvas yet: call canvas_set first"] };
     const r = patchCanvas(cur.source, ops);
     if (!r.ok) return { ok: false, errors: r.errors.map((e) => e.message) };
+    const rich = this.assets.check(r.root, this.cwdOf(agentId));
+    if (!rich.ok) return { ok: false, errors: rich.errors };
     this.authored.set(agentId, { source: r.root, updatedAt: this.now(), callsAtUpdate: this.callCount(agentId) });
     this.changed(agentId);
-    return { ok: true };
+    return { ok: true, notes: rich.notes };
+  }
+  /** The agent's workspace folder, from the creation hook or Paseo's record; null until one is known. */
+  cwdOf(agentId: string): string | null {
+    const known = this.cwds.get(agentId);
+    if (known) return known;
+    let cwd: string | null | undefined;
+    try { cwd = this.api?.agents.ref(agentId).current?.()?.cwd; } catch { /* no record yet */ }
+    if (cwd) this.cwds.set(agentId, cwd);
+    return cwd ?? null;
   }
   source(agentId: string): string | null {
     const a = this.authored.get(agentId);
@@ -342,15 +364,16 @@ export class Hub {
     try {
       const r = await this.api!.agents.list({ page: { limit: 100 } });
       const alive = new Set<string>();
-      for (const { agent } of r.entries) if (!agent.archivedAt) { alive.add(agent.id); const l0 = this.liveFor(agent.id); l0.title = agent.title; l0.workspaceId = agent.workspaceId ?? null; const lo = parseOverride(agent.labels?.[LABEL_KEY]); if (lo) this.ovLabel.set(agent.id, lo); if (this.resolved(agent.id).show) await this.refresh(agent.id); }
+      for (const { agent } of r.entries) if (!agent.archivedAt) { alive.add(agent.id); const l0 = this.liveFor(agent.id); l0.title = agent.title; l0.workspaceId = agent.workspaceId ?? null; if (agent.cwd) this.cwds.set(agent.id, agent.cwd); const lo = parseOverride(agent.labels?.[LABEL_KEY]); if (lo) this.ovLabel.set(agent.id, lo); if (this.resolved(agent.id).show) await this.refresh(agent.id); }
       // a canvas restored from disk for an agent that is archived or gone does not belong on the board
       for (const id of this.restored) if (!alive.has(id)) this.authored.delete(id);
       this.restored.clear();
     } catch (e) { this.o.log(`discover failed: ${(e as Error).message}`); }
   }
 
-  noteAgent(agentId: string, title?: string | null, workspaceId?: string | null) {
+  noteAgent(agentId: string, title?: string | null, workspaceId?: string | null, cwd?: string | null) {
     if (this.archived.has(agentId)) return;
+    if (cwd) this.cwds.set(agentId, cwd);
     const l = this.liveFor(agentId);
     if (title !== undefined) l.title = title;
     if (workspaceId) l.workspaceId = workspaceId;
@@ -499,7 +522,8 @@ export class Hub {
     const res = this.resolved(agentId);
     if (!res.show || (!a && !res.auto)) return null;
     const l = live ?? this.liveFor(agentId);
-    const tree = a?.source ?? autoCanvas(l.title, l.items, l.runState === "running");
+    // the clients get hashes and sizes in place of drawing bodies (the row is capped at 64 KiB)
+    const tree = a ? this.assets.wire(a.source, this.cwdOf(agentId)) : autoCanvas(l.title, l.items, l.runState === "running");
     return {
       agentId,
       workspaceId: l.workspaceId,

@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { answerRpc, getRpc, listRpc, overrideRpc } from "./shared/contract.ts";
+import { answerRpc, assetRpc, getRpc, listRpc, overrideRpc } from "./shared/contract.ts";
 import { DEFAULT_POLICY, ENV_KEY, canvasSettings, parseOverride, type CanvasPolicy } from "./shared/config.ts";
 import { Hub } from "./server/hub.ts";
 import { agentDeepLink } from "./shared/links.ts";
@@ -86,14 +86,14 @@ export default function contribute(server: PluginServerContext) {
   server.on("agent.created", (e, ctx) => {
     hub.capture(ctx, "agent.created");
     hub.bindByCwd(e.agent.id, e.agent.cwd);
-    hub.noteAgent(e.agent.id, e.agent.title, e.agent.workspaceId);
+    hub.noteAgent(e.agent.id, e.agent.title, e.agent.workspaceId, e.agent.cwd);
     void hub.learnLabels(e.agent.id); // a canvas=on|off label is only visible once the agent exists
   });
   for (const name of ["agent.turn_started", "agent.turn_ended", "agent.permission_requested", "agent.permission_resolved"] as const) {
     server.on(name, (e, ctx) => {
       hub.capture(ctx, name);
       if (name === "agent.turn_started") hub.turnStarted(e.agent.id);
-      hub.noteAgent(e.agent.id, e.agent.title, e.agent.workspaceId);
+      hub.noteAgent(e.agent.id, e.agent.title, e.agent.workspaceId, e.agent.cwd);
     });
   }
   for (const name of ["agent.archived", "agent.closed"] as const) {
@@ -115,6 +115,11 @@ export default function contribute(server: PluginServerContext) {
   server.handle(answerRpc, async (i, ctx) => {
     hub.capture(ctx, "rpc answer");
     return hub.answer(i.agentId, i.askId, i.value);
+  });
+  // The picture behind a hash, for the native Image: a PNG (light or dark) or the small original, base64, over the Paseo connection.
+  server.handle(assetRpc, async (i, ctx) => {
+    hub.capture(ctx, "rpc asset");
+    try { return { asset: await hub.assets.asset(i.hash, i.theme, i.width ?? 0) }; } catch (e) { log(`asset ${i.hash} failed: ${(e as Error).message}`); return { asset: null }; }
   });
   // The pill's runtime override. "on" for an agent without the tools also sends it the plain-HTTP recipe, once.
   server.handle(overrideRpc, (i, ctx) => {

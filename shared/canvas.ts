@@ -2,7 +2,8 @@
 // Every consumer (native renderer, HTML renderer, honesty checks, patching) works on the Node tree
 // this file produces, so nothing downstream ever sees agent-supplied code.
 
-import { codeToMarkdown, linkToMarkdown, noteToMarkdown, parseMarkdown, tableToMarkdown } from "./markdown.ts";
+import { codeToMarkdown, imagesOf, linkToMarkdown, noteToMarkdown, parseMarkdown, tableToMarkdown } from "./markdown.ts";
+import { SVG_LIMITS, sanitizeSvg } from "./svg.ts";
 
 export type AttrValue = string | number | boolean;
 export type Node = {
@@ -34,7 +35,7 @@ type TagSpec = {
   parents?: readonly string[];
 };
 
-export const BLOCKS = ["Bluf", "Steps", "Progress", "Metric", "Decision", "Ask", "Markdown", "Diff", "Chart", "Table", "Link", "Note", "Code"] as const;
+export const BLOCKS = ["Bluf", "Steps", "Progress", "Metric", "Decision", "Ask", "Markdown", "Svg", "Image", "Diff", "Chart", "Table", "Link", "Note", "Code"] as const;
 /** Retired in v3: still parsed for one release, then converted to a Markdown node (see `convertRetired`). */
 export const RETIRED = ["Table", "Link", "Note", "Code"] as const;
 export const TONES = ["info", "warn", "error", "success"] as const;
@@ -57,6 +58,8 @@ export const VOCABULARY: Record<string, TagSpec> = {
   Ask: { attrs: { question: { type: "string", required: true, max: 300 }, blocking: { type: "boolean" }, answer: { type: "string", max: 300 } }, children: ["Option"], text: false },
   Option: { attrs: { value: { type: "string", required: true, max: 80 } }, children: [], text: true, parents: ["Ask"] },
   Markdown: { attrs: {}, children: [], text: true, raw: true, maxText: 8_000 },
+  Svg: { attrs: { alt: { type: "string", max: 200 } }, children: [], text: true, raw: true, maxText: SVG_LIMITS.chars },
+  Image: { attrs: { src: { type: "string", required: true, max: 500 }, alt: { type: "string", max: 200 } }, children: [], text: false },
   Diff: { attrs: { file: { type: "string", max: 200 } }, children: [], text: true, raw: true },
   Chart: { attrs: { kind: { type: "enum", values: ["bar", "line"] }, title: { type: "string", max: 80 }, data: { type: "string", required: true, max: 2000 } }, children: [], text: false },
   Table: { attrs: { cols: { type: "string", required: true, max: 400 } }, children: ["Row"], text: false },
@@ -66,7 +69,8 @@ export const VOCABULARY: Record<string, TagSpec> = {
   Code: { attrs: { lang: { type: "string", max: 20 } }, children: [], text: true, raw: true },
 };
 
-export const LIMITS = { source: 32_000, nodes: 300, depth: 4, text: 4_000 };
+/** `rich`: Svg and Image blocks plus Markdown images; each costs a render and a cached asset. */
+export const LIMITS = { source: 96_000, nodes: 300, depth: 4, text: 4_000, rich: 8 };
 const ID_RE = /^[a-z][a-z0-9_-]{0,31}$/i;
 const ENTITIES: Record<string, string> = { "&lt;": "<", "&gt;": ">", "&amp;": "&", "&quot;": '"', "&apos;": "'" };
 const unescape = (s: string) => s.replace(/&(lt|gt|amp|quot|apos);/g, (m) => ENTITIES[m] ?? m);
@@ -188,7 +192,7 @@ function checkAttrs(spec: TagSpec, tag: string, attrs: Record<string, AttrValue>
   for (const [name, a] of Object.entries(spec.attrs)) if (a.required && !(name in attrs)) errors.push({ message: `<${tag}> needs ${name}`, ...where });
 }
 
-function finish(raw: RawNode, parent: string | null, depth: number, ids: Set<string>, counts: Map<string, number>, total: { n: number }, errors: Problem[]): Node {
+function finish(raw: RawNode, parent: string | null, depth: number, ids: Set<string>, counts: Map<string, number>, total: { n: number; rich?: number }, errors: Problem[]): Node {
   const where = { line: raw.line };
   const spec = VOCABULARY[raw.tag];
   total.n++;
@@ -212,7 +216,17 @@ function finish(raw: RawNode, parent: string | null, depth: number, ids: Set<str
   if (raw.text && !spec.text) errors.push({ message: `<${raw.tag}> cannot contain text ("${raw.text.slice(0, 30)}…")`, ...where, id });
   const maxText = spec.maxText ?? LIMITS.text;
   if (raw.text.length > maxText) errors.push({ message: `<${raw.tag}> text is over ${maxText} characters`, ...where, id });
-  if (raw.tag === "Markdown") { const md = parseMarkdown(raw.text); if (!md.ok) errors.push({ message: `<Markdown>: ${md.error}`, ...where, id }); }
+  if (raw.tag === "Markdown") {
+    const md = parseMarkdown(raw.text);
+    if (!md.ok) errors.push({ message: `<Markdown>: ${md.error}`, ...where, id });
+    else total.rich = (total.rich ?? 0) + imagesOf(md.blocks).length;
+  }
+  if (raw.tag === "Svg") {
+    total.rich = (total.rich ?? 0) + 1;
+    const svg = sanitizeSvg(raw.text);
+    if (!svg.ok) errors.push({ message: `<Svg>: ${svg.error}`, ...where, id });
+  }
+  if (raw.tag === "Image") total.rich = (total.rich ?? 0) + 1;
   if (raw.tag === "Link" && !/^https?:\/\//i.test(String(raw.attrs.href ?? ""))) errors.push({ message: "<Link> href must start with http:// or https://", ...where, id });
   for (const c of raw.children) node.children.push(finish(c, raw.tag, depth + 1, ids, counts, total, errors));
   if (raw.tag === "Ask" && node.children.length < 1) errors.push({ message: "<Ask> needs at least one <Option>", ...where, id });
@@ -225,9 +239,10 @@ export function parseCanvas(source: string): ParseResult {
   if (source.length > LIMITS.source) return { ok: false, errors: [{ message: `canvas source is over ${LIMITS.source} characters` }] };
   const raw = build(source, errors);
   if (errors.length || !raw) return { ok: false, errors: errors.length ? errors : [{ message: "could not parse the canvas" }] };
-  const total = { n: 0 };
+  const total: { n: number; rich?: number } = { n: 0 };
   const root = finish(raw, null, 0, new Set(), new Map(), total, errors);
   if (total.n > LIMITS.nodes) errors.push({ message: `more than ${LIMITS.nodes} elements` });
+  if ((total.rich ?? 0) > LIMITS.rich) errors.push({ message: `more than ${LIMITS.rich} images and SVG drawings on one canvas (${total.rich})` });
   if (!errors.length) convertRetired(root, errors);
   return errors.length ? { ok: false, errors } : { ok: true, root };
 }

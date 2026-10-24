@@ -59,7 +59,7 @@ test("structural errors: root, unclosed, mismatch, duplicate ids, limits", () =>
   assert.match(errs(`<Canvas title="x"><Bluf>x</Bluf>`).join(), /never closed/);
   assert.match(errs(`<Canvas title="x"><Bluf id="a">x</Bluf><Note id="a">y</Note></Canvas>`).join(), /duplicate id/);
   assert.match(errs(`<Canvas title="x"><Bluf>a < b</Bluf></Canvas>`).join(), /stray "<"/);
-  assert.match(errs("x".repeat(40_000)).join(), /over 32000/);
+  assert.match(errs("x".repeat(100_000)).join(), /over 96000/);
   const many = `<Canvas title="x">${"<Note>a</Note>".repeat(310)}</Canvas>`;
   assert.match(errs(many).join(), /more than 300 elements/);
   assert.match(errs(`<Canvas title="x"><Steps><Step state="done">a</Step></Steps></Canvas><Canvas title="y"></Canvas>`).join(), /only one root/);

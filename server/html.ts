@@ -9,6 +9,13 @@ import type { Inline, MdBlock } from "../shared/markdown.ts";
 
 export { esc };
 
+/** What the HTML needs from the server beyond the tree: the safe markup of a drawing, by hash. */
+export type RenderCtx = { svg?: (hash: string) => string | null };
+
+const unavailable = (what: string, alt: string) => `<div class="figmiss">${esc(alt ? `${what}: ${alt}` : `${what} unavailable`)}</div>`;
+const figure = (hash: string | null, alt: string, w: number, h: number) =>
+  hash ? `<figure class="fig"><img src="/asset/${esc(hash)}" alt="${esc(alt)}"${w && h ? ` width="${w}" height="${h}"` : ""} loading="lazy"></figure>` : unavailable("Image", alt);
+
 function lineChart(points: { label: string; value: number }[]): string {
   const W = 360, H = 110, pad = 18;
   const max = Math.max(...points.map((p) => p.value), 1);
@@ -45,6 +52,7 @@ function mdBlock(b: MdBlock): string {
       const tag = b.ordered ? "ol" : "ul";
       return `<${tag}${b.ordered && b.start !== 1 ? ` start="${b.start}"` : ""}>${b.items.map((it) => `<li${it.checked === null ? "" : ' class="task"'}>${it.checked === null ? "" : `<span class="chk${it.checked ? " on" : ""}" role="img" aria-label="${it.checked ? "done" : "not done"}">${it.checked ? "✓" : ""}</span>`}<div>${it.blocks.map(mdBlock).join("")}</div></li>`).join("")}</${tag}>`;
     }
+    case "image": return figure(b.hash ?? null, b.alt, b.w ?? 0, b.h ?? 0);
     case "table": {
       const al = (i: number, extra = "") => {
         const cls = [b.numeric[i] || b.align[i] === "right" ? "num" : b.align[i] === "center" ? "ctr" : "", extra].join(" ").trim();
@@ -55,7 +63,7 @@ function mdBlock(b: MdBlock): string {
   }
 }
 
-export function renderPlan(p: BlockPlan, agentId: string): string {
+export function renderPlan(p: BlockPlan, agentId: string, ctx: RenderCtx = {}): string {
   switch (p.kind) {
     case "bluf": return `<p class="lede">${esc(p.text)}</p>`;
     case "steps": return `<div class="sec">${slabel(p.label, { ticks: p.ticks, count: p.count })}<div class="steps">${p.rows.map((r) => stepRow(r.state, r.signal, r.text)).join("")}</div></div>`;
@@ -74,18 +82,23 @@ export function renderPlan(p: BlockPlan, agentId: string): string {
       return `<div class="sec">${p.label ? slabel(p.label) : ""}${body}</div>`;
     }
     case "markdown": return `<div class="md">${p.blocks.map(mdBlock).join("")}</div>`;
+    case "svg": {
+      const svg = p.hash ? ctx.svg?.(p.hash) : null;
+      return svg ? `<div class="svgwrap" role="img" aria-label="${esc(p.alt)}">${svg}</div>` : unavailable("Drawing", p.alt);
+    }
+    case "image": return figure(p.hash, p.alt, p.w, p.h);
   }
 }
 
-export function renderBlocks(root: Node, agentId: string): string {
-  return planBlocks(root).map((p) => renderPlan(p, agentId)).join("");
+export function renderBlocks(root: Node, agentId: string, ctx: RenderCtx = {}): string {
+  return planBlocks(root).map((p) => renderPlan(p, agentId, ctx)).join("");
 }
 
 /** One canvas: Paseo's status line, then the title row, then the blocks. */
-export function renderCanvas(v: CanvasView, now: number): string {
+export function renderCanvas(v: CanvasView, now: number, ctx: RenderCtx = {}): string {
   const sp = statusPlan(v, now);
   const me = selfStatus(v, sp.label);
-  const blocks = renderBlocks(v.tree, v.agentId);
+  const blocks = renderBlocks(v.tree, v.agentId, ctx);
   return `<article class="canvas${sp.dim ? " dim" : ""}"><div class="sheet">${statusLine(sp)}<div class="trow dimmable"><span class="title">${esc(v.title)}</span>${meta(`· ${me.text}`, me.contradicted ? "c-warn" : "")}${v.agentUrl ? `<span style="margin-left:auto"><a href="${esc(v.agentUrl)}" target="_blank" rel="noopener noreferrer">Open agent in Paseo ↗</a></span>` : ""}</div><div class="sheet dimmable">${blocks || '<span class="c-idle">Nothing yet.</span>'}</div></div></article>`;
 }
 

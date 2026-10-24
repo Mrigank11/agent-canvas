@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { PatchOp } from "../shared/canvas.ts";
 import type { Hub } from "./hub.ts";
-import { page, renderCanvas, renderIndex, esc } from "./html.ts";
+import { page, renderCanvas, renderIndex, esc, type RenderCtx } from "./html.ts";
+import { HASH_RE } from "./render/assets.ts";
 import { callTool, handleRpc } from "./mcp.ts";
 
 const MAX_BODY = 256_000;
@@ -19,6 +20,7 @@ const send = (res: ServerResponse, code: number, type: string, data: string) => 
 const json = (res: ServerResponse, code: number, v: unknown) => send(res, code, "application/json", JSON.stringify(v));
 
 export function startHttp(hub: Hub, port: number, host: string, log: (m: string) => void, now: () => number = Date.now): Promise<Server> {
+  const ctx: RenderCtx = { svg: (h) => hub.assets.inlineSvg(h) };
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://x");
@@ -31,12 +33,20 @@ export function startHttp(hub: Hub, port: number, host: string, log: (m: string)
         let g = m(/^\/a\/([\w-]+)$/);
         if (g) {
           const v = hub.view(g[1]);
-          return v ? send(res, 200, "text/html", page(v.title, renderCanvas(v, now()), `/frag/${g[1]}`, ` <span class="crumb">/</span> <span class="crumb">${esc(v.title)}</span>`)) : send(res, 404, "text/plain", "no such agent");
+          return v ? send(res, 200, "text/html", page(v.title, renderCanvas(v, now(), ctx), `/frag/${g[1]}`, ` <span class="crumb">/</span> <span class="crumb">${esc(v.title)}</span>`)) : send(res, 404, "text/plain", "no such agent");
         }
         g = m(/^\/frag\/([\w-]+)$/);
-        if (g) { const v = hub.view(g[1]); return v ? send(res, 200, "text/html", renderCanvas(v, now())) : send(res, 404, "text/plain", ""); }
+        if (g) { const v = hub.view(g[1]); return v ? send(res, 200, "text/html", renderCanvas(v, now(), ctx)) : send(res, 404, "text/plain", ""); }
         g = m(/^\/api\/canvas\/([\w-]+)$/);
         if (g) { const a = hub.resolve(g[1]); return send(res, 200, "text/plain", (a && hub.source(a)) ?? "No canvas yet."); }
+        // A checked image the canvas shows, as the bytes that were checked. Drawings are inlined in the page, never served.
+        g = m(/^\/asset\/([0-9a-f]{32})$/);
+        if (g && HASH_RE.test(g[1])) {
+          const f = hub.assets.file(g[1]);
+          if (!f) return send(res, 404, "text/plain", "no such image");
+          res.writeHead(200, { "content-type": f.mime, "cache-control": "public, max-age=31536000, immutable", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; sandbox" });
+          return void res.end(f.bytes);
+        }
         if (path === "/api/health") return json(res, 200, { ok: true, agents: hub.agents().length });
         if (m(/^\/mcp\//)) return send(res, 405, "text/plain", "POST only");
         return send(res, 404, "text/plain", "not found");

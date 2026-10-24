@@ -23,17 +23,18 @@ const TOOLS = [
   { name: "canvas_get", description: "Read back your current canvas source, with every element id.", inputSchema: { type: "object", properties: {} } },
 ];
 
+const notes = (n: string[]) => (n.length ? `\nNote:\n- ${n.join("\n- ")}` : "");
 const text = (t: string, isError = false) => ({ content: [{ type: "text", text: t }], isError });
 
 export function callTool(hub: Hub, agentId: string, name: string, args: any) {
   if (name === "canvas_set") {
     const r = hub.set(agentId, String(args?.source ?? ""));
-    return r.ok ? text(`Canvas updated. Element ids: ${r.ids.join(", ")}`) : text(`Canvas rejected, nothing changed:\n- ${r.errors.join("\n- ")}`, true);
+    return r.ok ? text(`Canvas updated. Element ids: ${r.ids.join(", ")}${notes(r.notes)}`) : text(`Canvas rejected, nothing changed:\n- ${r.errors.join("\n- ")}`, true);
   }
   if (name === "canvas_patch") {
     const ops = Array.isArray(args?.ops) ? (args.ops as PatchOp[]) : [];
     const r = hub.patch(agentId, ops);
-    return r.ok ? text("Patched.") : text(`Patch rejected, nothing changed:\n- ${r.errors.join("\n- ")}`, true);
+    return r.ok ? text(`Patched.${notes(r.notes)}`) : text(`Patch rejected, nothing changed:\n- ${r.errors.join("\n- ")}`, true);
   }
   if (name === "canvas_get") return text(hub.source(agentId) ?? "No canvas yet.");
   return text(`unknown tool ${name}`, true);

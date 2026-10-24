@@ -39,7 +39,7 @@ export function CanvasBody({ view, theme, live = null, footer }: { view: CanvasV
           </View>
         </View>
         <View style={{ opacity: plan.dim ? 0.55 : 1 }}>
-          <Blocks root={view.tree} agentId={view.agentId} askVariant="panel" />
+          <Blocks root={view.tree} agentId={view.agentId} askVariant="panel" pageUrl={view.url} />
           {view.tree.children.length === 0 ? <Txt c="muted">Nothing yet.</Txt> : null}
         </View>
         {footer ? <View style={{ gap: 8 }}><Hairline />{footer}</View> : null}

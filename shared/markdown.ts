@@ -1,6 +1,7 @@
 // Markdown for the <Markdown> block: a small, dependency-free CommonMark/GFM subset parsed to a plan-ready tree.
 // The plugin has no runtime node_modules, so this is our own parser. It is safe by construction: raw HTML is never
-// interpreted (it comes out as text), links keep only http(s)/mailto, and images are rejected. Both renderers
+// interpreted (it comes out as text), links keep only http(s)/mailto, and an image is only a *reference*: the server
+// resolves it against the agent's workspace (server/render/images.ts) and nothing is ever fetched from a URL. Both renderers
 // (server/html.ts, client/blocks.tsx) draw this tree; neither parses Markdown itself.
 //
 // Subset: ATX headings, paragraphs, fenced code, block quotes, GitHub alerts (> [!NOTE]), bullet/ordered/task lists
@@ -34,7 +35,9 @@ export type MdBlock =
   | { k: "alert"; alert: AlertKind; signal: Tone; glyph: string; title: string; blocks: MdBlock[] }
   | { k: "list"; ordered: boolean; start: number; items: { checked: boolean | null; blocks: MdBlock[] }[] }
   | { k: "table"; head: Inline[][]; align: ("left" | "right" | "center" | null)[]; numeric: boolean[]; rows: MdCell[][] }
-  | { k: "hr" };
+  | { k: "hr" }
+  /** `![alt](path)` on its own line. `hash`/`w`/`h` are filled by the plan from what the server resolved; without them it is drawn as its alt text. */
+  | { k: "image"; src: string; alt: string; hash?: string; w?: number; h?: number };
 
 export type MdResult = { ok: true; blocks: MdBlock[] } | { ok: false; error: string };
 
@@ -49,7 +52,8 @@ export function inlineText(c: Inline[]): string {
   return c.map((i) => (i.t === "text" || i.t === "code" ? i.v : inlineText(i.c))).join("");
 }
 
-class ImageError extends Error {}
+/** An image found while parsing inlines; only a paragraph accepts one (it splits there), anywhere else it is its alt text. */
+type Rich = Inline | { t: "image"; src: string; alt: string };
 
 function closer(s: string, from: number, mark: string): number {
   // the next unescaped `mark` that is not part of a longer run of the same character
@@ -64,8 +68,10 @@ function closer(s: string, from: number, mark: string): number {
   return -1;
 }
 
-function inline(s: string): Inline[] {
-  const out: Inline[] = [];
+function inline(s: string): Inline[];
+function inline(s: string, img: true): Rich[];
+function inline(s: string, img = false): Rich[] {
+  const out: Rich[] = [];
   let buf = "";
   const flush = () => { if (buf) { out.push({ t: "text", v: buf }); buf = ""; } };
   for (let i = 0; i < s.length; ) {
@@ -79,7 +85,19 @@ function inline(s: string): Inline[] {
       if (end > 0) { flush(); let v = s.slice(i + n, end).replace(/\n/g, " "); if (/^ .*[^ ].* $/.test(v)) v = v.slice(1, -1); out.push({ t: "code", v }); i = end + n; continue; }
       buf += fence; i += n; continue;
     }
-    if (ch === "!" && s[i + 1] === "[") throw new ImageError("Markdown images are not supported yet (the <Image> block arrives in a later release); describe it in words or link to it");
+    if (ch === "!" && s[i + 1] === "[") {
+      const close = closer(s, i + 2, "]");
+      if (close > 0 && s[close + 1] === "(") {
+        const end = s.indexOf(")", close + 2);
+        if (end > 0) {
+          const src = (s.slice(close + 2, end).trim().match(/^(?:<([^>]*)>|(\S+))/)?.slice(1).find(Boolean) ?? "").trim();
+          const alt = inlineText(inline(s.slice(i + 2, close)));
+          flush();
+          if (img) out.push({ t: "image", src, alt }); else if (alt) out.push({ t: "text", v: alt });
+          i = end + 1; continue;
+        }
+      }
+    }
     if (ch === "[") {
       const close = closer(s, i + 1, "]");
       if (close > 0 && s[close + 1] === "(") {
@@ -233,7 +251,7 @@ function blocks(lines: string[]): MdBlock[] {
         const best = bestCells(head, raw);
         out.push({
           k: "table",
-          head: head.map(inline),
+          head: head.map((c) => inline(c)),
           align,
           numeric: head.map((_, c) => isNumericColumn(raw, c)),
           rows: raw.map((r, ri) => r.map((c, ci) => ({ c: inline(c), best: best.has(`${ri}:${ci}`) }))),
@@ -245,19 +263,42 @@ function blocks(lines: string[]): MdBlock[] {
     const para: string[] = [line.trim()];
     i++;
     while (i < lines.length && lines[i].trim() && !startsBlock(lines[i]) && !(lines[i].includes("|") && TABLE_SEP.test(lines[i + 1] ?? "x"))) para.push(lines[i++].trim());
-    out.push({ k: "paragraph", c: inline(para.join("\n")) });
+    out.push(...paragraph(inline(para.join("\n"), true)));
   }
   return out;
 }
 
-/** Parse a Markdown body. Errors are for the agent to read (an image, today); nothing else fails. */
-export function parseMarkdown(text: string): MdResult {
-  try {
-    return { ok: true, blocks: blocks(text.replace(/\r\n?/g, "\n").replace(/\t/g, "    ").split("\n")) };
-  } catch (e) {
-    if (e instanceof ImageError) return { ok: false, error: e.message };
-    throw e;
+/** A paragraph that holds images becomes text runs and image blocks, in order. */
+function paragraph(c: Rich[]): MdBlock[] {
+  const out: MdBlock[] = [];
+  let cur: Inline[] = [];
+  const flush = () => { if (cur.some((x) => x.t !== "text" || x.v.trim())) out.push({ k: "paragraph", c: cur }); cur = []; };
+  for (const x of c) {
+    if (x.t === "image") { flush(); out.push({ k: "image", src: x.src, alt: x.alt }); } else cur.push(x);
   }
+  flush();
+  return out.length ? out : [{ k: "paragraph", c: [] }];
+}
+
+/** Every image in a parsed body, in document order. */
+export function imagesOf(bs: MdBlock[]): Extract<MdBlock, { k: "image" }>[] {
+  return bs.flatMap((b): Extract<MdBlock, { k: "image" }>[] =>
+    b.k === "image" ? [b] : b.k === "quote" || b.k === "alert" ? imagesOf(b.blocks) : b.k === "list" ? b.items.flatMap((it) => imagesOf(it.blocks)) : []);
+}
+
+/** Copy of the blocks with each image block passed through `f` (the plan attaches resolved assets this way). */
+export function mapImages(bs: MdBlock[], f: (b: Extract<MdBlock, { k: "image" }>) => MdBlock): MdBlock[] {
+  return bs.map((b): MdBlock =>
+    b.k === "image" ? f(b)
+    : b.k === "quote" ? { ...b, blocks: mapImages(b.blocks, f) }
+    : b.k === "alert" ? { ...b, blocks: mapImages(b.blocks, f) }
+    : b.k === "list" ? { ...b, items: b.items.map((it) => ({ ...it, blocks: mapImages(it.blocks, f) })) }
+    : b);
+}
+
+/** Parse a Markdown body. Nothing in Markdown itself fails (the result type keeps the door open); image paths are checked by the server. */
+export function parseMarkdown(text: string): MdResult {
+  return { ok: true, blocks: blocks(text.replace(/\r\n?/g, "\n").replace(/\t/g, "    ").split("\n")) };
 }
 
 // ---------- the retired tags, as Markdown ----------

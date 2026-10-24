@@ -1,9 +1,10 @@
 // Native block renderer: composes the shared primitives from the shared plan. No colours or rules live here.
 import { useRpc } from "@getpaseo/plugin/client";
-import { useState } from "react";
-import { Text, View } from "react-native";
+import { createContext, useContext, useEffect, useState } from "react";
+import * as RN from "react-native";
+import { Text, View, useWindowDimensions } from "react-native";
 import { planBlocks, type BlockPlan } from "../shared/plan";
-import { answerRpc } from "../shared/contract";
+import { answerRpc, assetRpc } from "../shared/contract";
 import { Bar, Button, Chip, DeltaChip, GlyphCircle, Hairline, Meta, Region, Section, SectionLabel, Sheet, StatusDot, StepRow, Txt, Well } from "./ui/atoms";
 import { ink, typeStyle, useT } from "./ui/tokens";
 import { openUrl } from "./common";
@@ -88,6 +89,60 @@ function MdInlines({ c, base }: { c: Inline[]; base?: object }) {
   );
 }
 
+// ---------- pictures: drawings and images arrive as hashes, the bytes come over the Paseo connection ----------
+
+/** Where the browser view of this canvas lives, for the "open it there" fallback. */
+const PageUrl = createContext<string | null>(null);
+type Asset = { mime: string; base64: string; w: number; h: number };
+const assets = new Map<string, Promise<Asset | null>>();
+
+/** One request per hash, theme and width bucket for the life of the pane; a miss is retried next time. */
+function loadAsset(fetchAsset: (i: { hash: string; theme: "light" | "dark"; width: number }) => Promise<{ asset: Asset | null }>, hash: string, dark: boolean, width: number): Promise<Asset | null> {
+  const key = `${hash}:${dark ? "d" : "l"}:${width}`;
+  let p = assets.get(key);
+  if (!p) {
+    p = fetchAsset({ hash, theme: dark ? "dark" : "light", width }).then((r) => r.asset).catch(() => null);
+    assets.set(key, p);
+    void p.then((v) => { if (!v) assets.delete(key); });
+    if (assets.size > 40) assets.delete(assets.keys().next().value!);
+  }
+  return p;
+}
+
+/**
+ * A picture. `Image` is not part of what Paseo documents for plugin screens (only View, Text, Pressable, ScrollView,
+ * TextInput), so it is read off the host module at render time: where it is missing, the alt text and a link to the
+ * browser view stand in, instead of a crash.
+ */
+function AssetImage({ hash, w, h, alt, label }: { hash: string | null; w: number; h: number; alt: string; label: string }) {
+  const t = useT();
+  const fetchAsset = useRpc(assetRpc);
+  const pageUrl = useContext(PageUrl);
+  const { width } = useWindowDimensions();
+  const px = Math.min(1440, Math.max(240, Math.ceil((width * 2) / 120) * 120));
+  const HostImage = (RN as { Image?: typeof RN.Image }).Image;
+  const [res, setRes] = useState<Asset | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    setRes(undefined);
+    if (hash && HostImage) void loadAsset(fetchAsset, hash, t.dark, px).then((v) => { if (live) setRes(v); });
+    return () => { live = false; };
+  }, [hash, t.dark, px, !!HostImage]);
+  if (!hash || !HostImage || res === null) {
+    return (
+      <View style={{ backgroundColor: t.well, borderRadius: 8, padding: 12, gap: 4 }}>
+        <Txt c="muted">{alt ? `${label}: ${alt}` : `${label} (not shown here)`}</Txt>
+        {pageUrl && hash ? <Text accessibilityRole="link" onPress={() => openUrl(pageUrl)} style={[typeStyle("meta"), { color: ink(t, "run") }]}>Open in the browser view</Text> : null}
+      </View>
+    );
+  }
+  return (
+    <View style={{ width: "100%", aspectRatio: w && h ? w / h : 16 / 9, borderRadius: 8, overflow: "hidden", backgroundColor: res ? "transparent" : t.well }}>
+      {res ? <HostImage accessibilityLabel={alt || label} source={{ uri: `data:${res.mime};base64,${res.base64}` }} resizeMode="contain" style={{ width: "100%", height: "100%" }} /> : null}
+    </View>
+  );
+}
+
 function MdTable({ b }: { b: Extract<MdBlock, { k: "table" }> }) {
   const t = useT();
   const cell = (i: number) => ({ flex: 1, textAlign: b.numeric[i] || b.align[i] === "right" ? ("right" as const) : b.align[i] === "center" ? ("center" as const) : ("left" as const) });
@@ -141,6 +196,7 @@ function MdBlockView({ b }: { b: MdBlock }) {
         </View>
       );
     case "table": return <MdTable b={b} />;
+    case "image": return <AssetImage hash={b.hash ?? null} w={b.w ?? 0} h={b.h ?? 0} alt={b.alt} label="Image" />;
   }
 }
 
@@ -222,10 +278,12 @@ export function BlockView({ plan, agentId, askVariant, dense }: { plan: BlockPla
     case "diff": return <Diff plan={plan} />;
     case "chart": return <Chart plan={plan} />;
     case "markdown": return <View style={{ gap: 8 }}>{plan.blocks.map((b, i) => <MdBlockView key={i} b={b} />)}</View>;
+    case "svg": return <AssetImage hash={plan.hash} w={plan.w} h={plan.h} alt={plan.alt} label="Drawing" />;
+    case "image": return <AssetImage hash={plan.hash} w={plan.w} h={plan.h} alt={plan.alt} label="Image" />;
   }
 }
 
 /** The blocks of a canvas as one sheet. */
-export function Blocks({ root, agentId, only, askVariant, dense, gap }: { root: Node; agentId: string; only?: ReadonlySet<string>; askVariant?: "panel" | "flat"; dense?: boolean; gap?: number }) {
-  return <Sheet gap={gap}>{planBlocks(root, only).map((p) => <BlockView key={p.id} plan={p} agentId={agentId} askVariant={askVariant} dense={dense} />)}</Sheet>;
+export function Blocks({ root, agentId, only, askVariant, dense, gap, pageUrl }: { root: Node; agentId: string; only?: ReadonlySet<string>; askVariant?: "panel" | "flat"; dense?: boolean; gap?: number; pageUrl?: string }) {
+  return <PageUrl.Provider value={pageUrl ?? null}><Sheet gap={gap}>{planBlocks(root, only).map((p) => <BlockView key={p.id} plan={p} agentId={agentId} askVariant={askVariant} dense={dense} />)}</Sheet></PageUrl.Provider>;
 }

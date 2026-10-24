@@ -2,12 +2,15 @@
 // These tests fail when someone adds a colour or rule at a call site instead of in shared/ui-spec.ts.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { planBlocks, statusPlan, type BlockPlan } from "../shared/plan.ts";
 import { SIGNAL, TONES, tokensFixed } from "../shared/ui-spec.ts";
 import { COMPONENT_CSS, cssVars } from "../server/ui-html.ts";
 import { renderBlocks, renderCanvas, renderIndex } from "../server/html.ts";
+import { parseCanvas } from "../shared/canvas.ts";
+import { Assets } from "../server/render/assets.ts";
 import { SHOWCASE, showcaseTree, viewOf } from "./plan.test.ts";
 
 const root = new URL("..", import.meta.url).pathname;
@@ -57,7 +60,7 @@ test("every plan kind has a native renderer and an HTML renderer", () => {
 
 test("every Markdown block and inline kind has a native and an HTML renderer", () => {
   const native = read("client/blocks.tsx"), html = read("server/html.ts");
-  for (const k of ["heading", "paragraph", "hr", "code", "quote", "alert", "list", "table"]) {
+  for (const k of ["heading", "paragraph", "hr", "code", "quote", "alert", "list", "table", "image"]) {
     assert.match(native, new RegExp(`case "${k}"`), `native MdBlockView lacks ${k}`);
     assert.match(html, new RegExp(`case "${k}"`), `HTML mdBlock lacks ${k}`);
   }
@@ -65,6 +68,30 @@ test("every Markdown block and inline kind has a native and an HTML renderer", (
     assert.match(native, new RegExp(`case "${k}"`), `native MdInlines lacks ${k}`);
     assert.match(html, new RegExp(`case "${k}"`), `HTML mdInline lacks ${k}`);
   }
+});
+
+test("pictures: both renderers draw the plan's hash, alt text and size, the browser inline or by <img>, the phone through the asset RPC", () => {
+  const ws = mkdtempSync(join(tmpdir(), "parity-"));
+  writeFileSync(join(ws, "pic.png"), readFileSync(join(root, "test/fixtures/pic.png")));
+  const assets = new Assets(null);
+  const tree = (() => { const r = parseCanvas(`<Canvas title="t"><Svg id="d" alt="Pipeline"><svg viewBox="0 0 160 40"><text x="4" y="20">build</text></svg></Svg><Image id="i" src="pic.png" alt="Screenshot"/><Markdown id="m">![inline](pic.png)</Markdown></Canvas>`); assert.ok(r.ok); return r.ok ? r.root : (null as never); })();
+  assert.ok(assets.check(tree, ws).ok);
+  const wired = assets.wire(tree, ws);
+  const plans = planBlocks(wired);
+  const html = renderBlocks(wired, "a1", { svg: (h) => assets.inlineSvg(h) });
+  const [svg, img, md] = plans;
+  assert.ok(svg.kind === "svg" && svg.hash && img.kind === "image" && img.hash && md.kind === "markdown");
+  if (svg.kind !== "svg" || img.kind !== "image" || md.kind !== "markdown") return;
+  has(html, `aria-label="${svg.alt}"`); has(html, assets.inlineSvg(svg.hash)!);
+  has(html, `src="/asset/${img.hash}" alt="${img.alt}" width="${img.w}" height="${img.h}"`);
+  const mdImg = md.blocks.find((b) => b.k === "image");
+  assert.ok(mdImg && mdImg.k === "image" && mdImg.hash);
+  if (mdImg && mdImg.k === "image") has(html, `src="/asset/${mdImg.hash}" alt="inline"`);
+  // the native component is fed from the very same plan fields, and asks the plugin RPC rather than the HTTP port
+  const native = read("client/blocks.tsx");
+  for (const f of ["plan.hash", "plan.alt", "plan.w", "plan.h", "b.hash", "b.alt"]) assert.ok(native.includes(f), `native renderer does not read ${f}`);
+  assert.match(native, /assetRpc/);
+  assert.doesNotMatch(native, /\bfetch\(|XMLHttpRequest|https?:\/\//, "native reaches pictures only through the RPC");
 });
 
 const has = (html: string, s: string) => assert.ok(html.includes(s), `HTML is missing ${s}`);

@@ -1,7 +1,7 @@
 // A render plan: the canvas tree turned into a short list of primitive descriptions (kind, signal, glyph, text).
 // The native and browser renderers draw from the same plan, so what a block means (which signal, which glyph,
 // which cell is best) is decided here once. Renderers only decide how to paint it.
-import { parseMarkdown, type MdBlock } from "./markdown.ts";
+import { mapImages, parseMarkdown, type MdBlock } from "./markdown.ts";
 import { chartPoints, type Node, type StepState } from "./canvas.ts";
 import { bgFacts, checkHonesty, summarize, type Verdict } from "./honesty.ts";
 import type { CanvasView } from "./contract.ts";
@@ -20,7 +20,13 @@ export type BlockPlan =
   | { kind: "ask"; id: string; question: string; answered: string | null; options: { value: string; label: string }[] }
   | { kind: "diff"; id: string; file: string | null; add: number; del: number; lines: DiffLine[] }
   | { kind: "chart"; id: string; label: string | null; line: boolean; points: { label: string; value: number }[] }
-  | { kind: "markdown"; id: string; blocks: MdBlock[] };
+  | { kind: "markdown"; id: string; blocks: MdBlock[] }
+  /** `hash`: the server's artefact for it (null when the client was given the raw tree, or the artefact is gone: drawn as `alt`). */
+  | { kind: "svg"; id: string; hash: string | null; alt: string; w: number; h: number }
+  | { kind: "image"; id: string; hash: string | null; alt: string; src: string; w: number; h: number };
+
+/** The size and hash the server attached to a node (see Assets.wire); absent on a tree that was never wired. */
+const assetOf = (a: Node["attrs"]): { hash: string | null; w: number; h: number } => ({ hash: typeof a.hash === "string" ? a.hash : null, w: Number(a.w) || 0, h: Number(a.h) || 0 });
 
 export function diffLines(text: string): DiffLine[] {
   return text.split("\n").map((l) => ({ kind: l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : l.startsWith("@@") ? "hunk" : "ctx", text: l }));
@@ -59,8 +65,13 @@ export function planBlock(n: Node): BlockPlan | null {
     case "Chart": return { kind: "chart", id: n.id, label: n.attrs.title ? String(n.attrs.title) : null, line: n.attrs.kind === "line", points: chartPoints(String(n.attrs.data)) ?? [] };
     case "Markdown": {
       const md = parseMarkdown(n.text);
-      return { kind: "markdown", id: n.id, blocks: md.ok ? md.blocks : [{ k: "paragraph", c: [{ t: "text", v: n.text }] }] };
+      let found: Record<string, { hash: string; w: number; h: number }> = {};
+      try { found = typeof n.attrs.assets === "string" ? JSON.parse(n.attrs.assets) : {}; } catch { /* a tree from a wire that is not ours: no images */ }
+      const blocks = md.ok ? mapImages(md.blocks, (b) => (found[b.src] ? { ...b, ...found[b.src] } : b)) : [{ k: "paragraph" as const, c: [{ t: "text" as const, v: n.text }] }];
+      return { kind: "markdown", id: n.id, blocks };
     }
+    case "Svg": return { kind: "svg", id: n.id, alt: String(n.attrs.alt ?? ""), ...assetOf(n.attrs) };
+    case "Image": return { kind: "image", id: n.id, alt: String(n.attrs.alt ?? ""), src: String(n.attrs.src), ...assetOf(n.attrs) };
     default: return null;
   }
 }

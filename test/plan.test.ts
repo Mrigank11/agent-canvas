@@ -16,6 +16,8 @@ export const SHOWCASE = `<Canvas title="Block showcase" status="working">
 +const a = 2;
  keep</Diff>
   <Chart kind="line" title="Weekly" data="mon:3,tue:5" />
+  <Svg id="pipe" alt="Pipeline"><svg viewBox="0 0 160 40"><rect x="2" y="8" width="60" height="24" rx="4" fill="none" stroke="#36c"/><text x="12" y="25">build</text></svg></Svg>
+  <Image id="shot" src="out/shot.png" alt="Screenshot" />
   <Table cols="Option|Latency|Cost"><Row>Postgres|4 ms|$25/mo</Row><Row>DynamoDB|2 ms|$40/mo</Row></Table>
   <Link href="https://paseo.sh">Paseo</Link>
   <Note tone="warn">Careful.</Note><Note tone="success">Fine.</Note>
@@ -27,7 +29,7 @@ export const viewOf = (tree = showcaseTree(), o: Partial<CanvasView> = {}): Canv
 
 test("a canvas plans to one entry per block, with runs of metrics merged", () => {
   const plans = planBlocks(showcaseTree());
-  assert.deepEqual(plans.map((p) => p.kind), ["bluf", "steps", "progress", "metrics", "decision", "ask", "diff", "chart", "markdown", "markdown", "markdown", "markdown", "markdown"]);
+  assert.deepEqual(plans.map((p) => p.kind), ["bluf", "steps", "progress", "metrics", "decision", "ask", "diff", "chart", "svg", "image", "markdown", "markdown", "markdown", "markdown", "markdown"]);
   assert.equal(plans.find((p) => p.kind === "metrics" && p.items.length === 3) !== undefined, true);
 });
 

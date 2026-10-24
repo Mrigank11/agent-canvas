@@ -86,3 +86,13 @@ export const overrideRpc = defineRpc({
   input: z.object({ agentId: z.string(), value: z.enum(["on", "off", "default"]) }),
   output: z.object({ ok: z.boolean(), state: stateSchema }),
 });
+
+/**
+ * The picture behind a hash: a PNG (or the small original) as base64, for the native Image component. The timeline row
+ * carries only hashes; this is how a phone gets the bytes, over the Paseo connection rather than the plugin's HTTP port.
+ */
+export const assetRpc = defineRpc({
+  name: "canvas.asset",
+  input: z.object({ hash: z.string().regex(/^[0-9a-f]{32}$/), theme: z.enum(["light", "dark"]), width: z.number().optional() }),
+  output: z.object({ asset: z.object({ mime: z.string(), base64: z.string(), w: z.number(), h: z.number() }).nullable() }),
+});

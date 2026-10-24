@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseCanvas, patchCanvas, serialize, findNode } from "../shared/canvas.ts";
-import { inlineText, parseMarkdown, type MdBlock } from "../shared/markdown.ts";
+import { imagesOf, inlineText, parseMarkdown, type MdBlock } from "../shared/markdown.ts";
 import { planBlocks } from "../shared/plan.ts";
 import { renderBlocks } from "../server/html.ts";
 
@@ -68,15 +68,16 @@ test("the fixture renders the same facts in the plan and in the browser HTML", (
   assert.equal((html.match(/class="[^"]*best/g) ?? []).length, 2);
 });
 
-test("raw HTML is text, unsafe links lose their href, images are rejected with a clear error", () => {
+test("raw HTML is text, unsafe links lose their href, an unresolved image shows as its alt text", () => {
   const html = renderBlocks((parseCanvas(canvas('<script>alert(1)</script> and <img src=x onerror=y> [x](javascript:alert(1)) [y](/rel) [z](data:text/html,hi)')) as any).root, "a");
   assert.ok(!html.includes("<script"), html);
   assert.ok(!html.includes("<img"), html);
   assert.ok(!/href="(javascript|data|\/rel)/.test(html), html);
   assert.ok(html.includes("&lt;script&gt;"));
-  const img = parseCanvas(canvas("look ![chart](chart.png)"));
-  assert.ok(!img.ok);
-  if (!img.ok) assert.match(img.errors.map((e) => e.message).join(), /images are not supported yet/);
+  const img = parseCanvas(canvas("look ![chart](chart.png)")); // the parser accepts it; whether the file may be shown is the server's call
+  assert.ok(img.ok);
+  const shown = renderBlocks((img as any).root, "a");
+  assert.ok(!shown.includes("<img") && shown.includes("chart"), shown);
   assert.ok(!parseCanvas(canvas("x".repeat(8001))).ok);
 });
 
@@ -114,6 +115,18 @@ test("a Markdown block patches by id and re-validates", () => {
   const p = patchCanvas(r.root, [{ id: "m", text: "| a |\n|---|\n| 1 |" }]);
   assert.ok(p.ok);
   if (p.ok) assert.equal(blocksOf(findNode(p.root, "m")!.text)[0].k, "table");
-  const bad = patchCanvas(r.root, [{ id: "m", text: "![x](y.png)" }]);
-  assert.ok(!bad.ok);
+  const bad = patchCanvas(r.root, [{ id: "m", text: "![x](y.png) ".repeat(9) }]);
+  assert.ok(!bad.ok); // nine pictures is over the cap of eight
+  assert.ok(patchCanvas(r.root, [{ id: "m", text: "![x](y.png) ".repeat(8) }]).ok);
+});
+
+test("Markdown images are image blocks: alone, mid-paragraph (the paragraph splits), in quotes and lists", () => {
+  const bs = blocksOf('before ![a chart](out/c.png "title") after\n\n![](<my dir/x y.png>)\n\n> ![q](q.png)\n\n- item ![l](l.png)');
+  assert.deepEqual(bs.map((b) => b.k), ["paragraph", "image", "paragraph", "image", "quote", "list"]);
+  const imgs = imagesOf(bs);
+  assert.deepEqual(imgs.map((i) => [i.src, i.alt]), [["out/c.png", "a chart"], ["my dir/x y.png", ""], ["q.png", "q"], ["l.png", "l"]]);
+  // inside a heading, a table cell or a link label an image is only its alt text: it never draws
+  const flat = blocksOf("# ![h](h.png) head\n\n| a |\n|---|\n| ![c](c.png) |\n\n[![b](b.png)](https://x.y)");
+  assert.equal(imagesOf(flat).length, 0);
+  assert.equal(blocksOf("not an image: ![broken(x.png)")[0].k, "paragraph");
 });
