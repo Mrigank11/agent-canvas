@@ -289,7 +289,9 @@ export class Assets {
   vector(hash: string, theme: Theme): { mime: string; base64: string; w: number; h: number } | null {
     const e = this.stored(hash);
     if (!e) return null;
-    const svg = e.svg.replace(/^<svg /, `<svg color="${tokensFixed(theme).fg}" `);
+    // an image has no page font to inherit: text falls back to sans-serif, as in the PNG (which draws with Liberation Sans)
+    const font = /^<svg [^>]*\sfont-family=/.test(e.svg) ? "" : ` font-family="Helvetica, Arial, 'Liberation Sans', sans-serif"`;
+    const svg = e.svg.replace(/^<svg /, `<svg color="${tokensFixed(theme).fg}"${font} `);
     return { mime: "image/svg+xml", base64: Buffer.from(svg).toString("base64"), w: e.w, h: e.h };
   }
 

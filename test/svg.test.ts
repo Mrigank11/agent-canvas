@@ -117,3 +117,9 @@ test("a long path and attribute values survive; hostile values in numeric attrib
   assertSafe(r.svg);
   assert.doesNotMatch(r.svg, /expression|javascript|evil/);
 });
+
+test("a marker keeps its own viewBox (arrowheads), and a bad one is dropped", () => {
+  const out = (vb: string) => { const r = sanitizeSvg(`<svg viewBox="0 0 400 160"><defs><marker id="a" viewBox="${vb}" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker></defs><line x1="1" y1="1" x2="9" y2="9" marker-end="url(#a)"/></svg>`); assert.ok(r.ok); return r.ok ? r.svg : ""; };
+  assert.match(out("0 0 10 10"), /<marker [^>]*viewBox="0 0 10 10"/);
+  assert.doesNotMatch(out("0 0 x 10"), /<marker [^>]*viewBox/);
+});

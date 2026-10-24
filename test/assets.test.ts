@@ -312,7 +312,12 @@ test("web format: a drawing comes back as the rebuilt SVG, themed, never the age
   assert.ok(ls.includes("hi") && ls.includes("<rect"));
   for (const bad of [/<script/i, /foreignObject/i, /onload/i, /onclick/i, /javascript:/i, /alert/, /<a[ >]/, /href/i]) assert.ok(!bad.test(ls), `${bad} must not survive`);
   // the vector is exactly the sanitiser's output plus the ink, nothing else
-  assert.equal(ls.replace(/ color="#[0-9a-fA-F]+"/, ""), a.inlineSvg(v.art.hash));
+  assert.equal(ls.replace(/ color="#[0-9a-fA-F]+"/, "").replace(/ font-family="[^"]*"/, ""), a.inlineSvg(v.art.hash));
+  assert.match(ls, /^<svg [^>]*font-family="Helvetica/, "an image has no page font: sans-serif like the PNG");
+  // a root that sets its own font keeps it (no duplicate attribute)
+  const own = a.svg.validate(`<svg viewBox="0 0 10 10" font-family="Georgia"><text x="1" y="5">x</text></svg>`, { cwd: null });
+  assert.ok(own.ok);
+  if (own.ok) assert.equal((decodeSvg((await a.asset(own.art.hash, "light", 100, "svg"))!.base64).match(/font-family=/g) ?? []).length, 1);
 });
 
 test("web format: only drawings are vectors; images and unknown hashes keep the PNG path", async () => {

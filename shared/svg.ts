@@ -172,7 +172,10 @@ export function sanitizeSvg(source: string, lim: Limits = SVG_LIMITS): SvgResult
       case "word": return WORD.test(t) ? t : null;
       case "family": return /^[\w\s,'"-]*$/.test(t) ? t : null;
       case "space": return t === "preserve" || t === "default" ? t : null;
-      case "viewBox": return vb.join(" ");
+      case "viewBox": { // the root's was checked above; a marker's own box is its own (it is not the drawing's)
+        const n = t.split(/[\s,]+/).map(Number);
+        return n.length === 4 && n.every((x) => Number.isFinite(x)) && n[2] > 0 && n[3] > 0 && n[2] <= 100_000 && n[3] <= 100_000 ? n.join(" ") : null;
+      }
       case "paint": {
         if (PAINT.test(t)) return t;
         // url(#id) with an optional fallback colour
