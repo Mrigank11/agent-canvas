@@ -1,8 +1,9 @@
 // The reusable native primitives (design v2, section 4.3). Each reads the tokens by context and the rules from shared/.
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AccessibilityInfo, Animated, Pressable, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
+import { Icon } from "@getpaseo/plugin/client/react-native";
+import { AccessibilityInfo, Animated, Pressable, ScrollView, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import type { StepState } from "../../shared/canvas";
-import type { FlagPlan, StatusPlan } from "../../shared/plan";
+import type { ActivityPlan, FlagPlan, StatusPlan } from "../../shared/plan";
 import { FLAG_GLYPH, RADIUS, STEP_GLYPH, stepSignal, type Delta, type Tone } from "../../shared/ui-spec";
 import { ink, typeStyle, useT, type Ink } from "./tokens";
 
@@ -199,6 +200,70 @@ export function FlagLine({ flag }: { flag: FlagPlan }) {
   );
 }
 
+/** A 24px tinted square holding Paseo's own icon for the tool. "Last: …" uses a bare ring instead: nothing is running. */
+export function ToolGlyph({ icon, tone, ring }: { icon: string; tone: "run" | "idle"; ring?: boolean }) {
+  const t = useT();
+  const s = t.sig(tone);
+  if (ring) return <View style={{ width: 12, height: 12, borderRadius: 6, borderWidth: 1.5, borderColor: t.lineStrong, marginHorizontal: 6 }} />;
+  return (
+    <View style={{ width: 24, height: 24, borderRadius: RADIUS.chip, alignItems: "center", justifyContent: "center", backgroundColor: tone === "run" ? s.tint : t.well }}>
+      <Icon name={icon} size={14} color={tone === "run" ? s.text : t.muted} />
+    </View>
+  );
+}
+
+export function MonoChip({ text }: { text: string }) {
+  return <Txt role="mono" c="muted" numberOfLines={1} style={{ fontSize: 11.5, lineHeight: 16 }}>{text}</Txt>;
+}
+
+/**
+ * The Now row: what the agent is doing this second. Icon, humanised label, the target as a muted mono chip and a ticking
+ * elapsed time. Tap it for the full command and the last three actions. Quiet "Last: …" when nothing is running.
+ */
+export function ActivityRow({ plan }: { plan: ActivityPlan }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const expandable = !!plan.full || plan.recent.length > 0;
+  const idleLast = !plan.live;
+  const row = (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 32, paddingVertical: 4, paddingHorizontal: 8, marginHorizontal: -8, borderRadius: RADIUS.control, backgroundColor: open ? t.raised : "transparent" }}>
+      <ToolGlyph icon={plan.icon} tone={plan.tone} ring={idleLast} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Txt role="body" weight={plan.tone === "run" ? "500" : "400"} c={plan.tone === "run" ? "fg" : "muted"} numberOfLines={1} style={{ lineHeight: 18 }}>{plan.label}</Txt>
+        {plan.target ? <MonoChip text={plan.target} /> : null}
+      </View>
+      <Txt role="label" c={plan.tone === "run" ? "run" : "faint"} style={{ marginLeft: "auto" }}>{plan.elapsed}</Txt>
+      {expandable ? <Text style={{ color: t.faint, fontSize: 16, lineHeight: 16, width: 10, textAlign: "center", transform: [{ rotate: open ? "90deg" : "0deg" }] }}>›</Text> : null}
+    </View>
+  );
+  return (
+    <View>
+      {expandable ? <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`${plan.label}, ${plan.elapsed}`} onPress={() => setOpen(!open)}>{row}</Pressable> : row}
+      {open ? (
+        <View style={{ gap: 10, paddingTop: 6 }}>
+          {plan.full ? (
+            <Well>
+              <ScrollView style={{ maxHeight: 8 * 17 + 4 }} nestedScrollEnabled>
+                {plan.full.split("\n").map((l, i) => <Text key={i} style={[typeStyle("mono"), { fontSize: 11.5, lineHeight: 17, color: t.fg, paddingHorizontal: 12 }]}>{l || " "}</Text>)}
+              </ScrollView>
+            </Well>
+          ) : null}
+          {plan.recent.length ? (
+            <View style={{ gap: 0 }}>
+              {plan.recent.map((r, i) => (
+                <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 3 }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, ...(r.ok ? { backgroundColor: t.sig("ok").tint, borderWidth: 1.5, borderColor: t.sig("ok").dot } : { backgroundColor: t.sig("err").dot }) }} />
+                  <Txt role="meta" c={r.ok ? "muted" : "err"}>{r.label}{!r.ok && r.exitCode != null ? ` · exit ${r.exitCode}` : ""}</Txt>
+                </View>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 /** Paseo's own line: badge and run state, then the facts. The agent cannot write into it. */
 export function StatusLine({ plan, hairline = true }: { plan: StatusPlan; hairline?: boolean }) {
   const t = useT();
@@ -208,6 +273,7 @@ export function StatusLine({ plan, hairline = true }: { plan: StatusPlan; hairli
         <StatusBadge tone={plan.signal} label={plan.label} glyph={plan.signal === "ok" ? "check" : "dot"} />
         <Meta>{plan.run}</Meta>
       </View>
+      {plan.activity ? <ActivityRow plan={plan.activity} /> : null}
       <Text style={typeStyle("meta")}>
         {plan.lead ? <Text style={{ color: ink(t, "hot"), fontWeight: "500" }}>{plan.lead}{" · "}</Text> : null}
         {plan.facts.map((f, i) => (

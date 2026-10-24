@@ -25,7 +25,11 @@ export const canvasView = z.object({
   callsNow: z.number(),
   /** Run state when the server last looked; clients prefer the live value from Paseo. */
   runState: z.enum(["initializing", "idle", "running", "error", "closed"]),
-  /** The tool the agent is running right now, from Paseo's timeline (not from the canvas). */
+  /** The call the agent is running right now, structured, with the time the hub first saw it running. */
+  activity: z.object({ kind: z.enum(["shell", "edit", "write", "read", "search", "fetch", "other"]), name: z.string(), command: z.string().optional(), path: z.string().optional(), url: z.string().optional(), query: z.string().optional(), startedAt: z.number() }).nullable().default(null),
+  /** The last three finished actions (newest first), as past-tense labels. Canvas bookkeeping is left out. */
+  recent: z.array(z.object({ kind: z.enum(["shell", "edit", "write", "read", "search", "fetch", "other"]), label: z.string(), ok: z.boolean(), exitCode: z.number().nullable().optional(), endedAt: z.number() })).max(3).default([]),
+  /** The tool the agent is running right now, from Paseo's timeline (not from the canvas). One short line; kept for older clients. */
   currentTool: z.string().nullable(),
   /** ms epoch of the agent's last activity as Paseo reports it. */
   lastActivityAt: z.number(),

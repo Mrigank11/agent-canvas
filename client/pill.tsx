@@ -6,7 +6,7 @@ import { planBlocks, statusPlan } from "../shared/plan";
 import { listRpc, overrideRpc, type CanvasView } from "../shared/contract";
 import { Blocks } from "./blocks";
 import { CanvasProvider, openUrl, useNow, useView } from "./common";
-import { Button, Meta, ProgressTicks, StatusBadge, StatusDot, Txt } from "./ui/atoms";
+import { ActivityRow, Button, Meta, ProgressTicks, StatusBadge, StatusDot, Txt } from "./ui/atoms";
 import { UiRoot } from "./ui/tokens";
 import { focusStore, pillStore, reportFocus, usePillState } from "./store";
 
@@ -75,6 +75,7 @@ function Inner({ view, now, agentId }: { view: CanvasView; now: number; agentId:
             <Txt role="label" c="fg">{steps.count}</Txt>
           </View>
         ) : null}
+        {plan.activity ? <ActivityRow plan={plan.activity} /> : null}
         {lead ? <Meta c={plan.lead ? "hot" : plan.flags[0]?.signal}>{lead}</Meta> : null}
       </View>
       <Blocks root={view.tree} agentId={agentId} only={new Set(["Bluf", "Steps", "Progress", "Metric", "Ask"])} askVariant="panel" dense gap={16} />

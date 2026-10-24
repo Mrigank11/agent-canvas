@@ -185,3 +185,76 @@ export function bestCells(cols: string[], rows: string[][]): Set<string> {
   });
   return best;
 }
+
+// ---------- activity: what the agent is doing right now (the Now row) ----------
+
+export type ActivityKind = "shell" | "edit" | "write" | "read" | "search" | "fetch" | "other";
+/** What the hub knows about a tool call. `startedAt` is stamped by the hub the first time it sees the call running. */
+export type ActivityCall = { kind: ActivityKind; name: string; command?: string; path?: string; url?: string; query?: string; startedAt: number };
+export type RecentCall = { kind: ActivityKind; /** past tense: "Edited atoms.tsx" */ label: string; ok: boolean; exitCode?: number | null; endedAt: number };
+export type Classified = { icon: string; label: string; past: string; target: string | null; bookkeeping: boolean };
+/** How long "Last: …" stays after the agent's last action. */
+export const LAST_VISIBLE_MS = 10 * 60_000;
+/** Lucide names the Now row can use. The browser carries an SVG for each (server/ui-html.ts). */
+export const ACTIVITY_ICONS = ["LayoutDashboard", "FlaskConical", "GitBranch", "SquareTerminal", "FilePen", "Package", "Hourglass", "Pencil", "Eye", "Search", "Globe", "Wrench"] as const;
+
+const base = (p: string) => p.replace(/\/+$/, "").split("/").pop() || p;
+const dir = (p: string) => { const i = p.replace(/\/+$/, "").lastIndexOf("/"); return i > 0 ? p.slice(0, i) : null; };
+const shortTarget = (s: string) => oneLine(s, 60);
+
+/** First meaningful line of a shell command, with leading `VAR=x` assignments and `cd dir &&` dropped. */
+function shellHead(command: string): { line: string; words: string[] } {
+  let line = oneLine(command, 400);
+  const cd = /^cd\s+\S+\s*&&\s*(.+)$/.exec(line);
+  if (cd) line = cd[1];
+  const words = line.split(" ").filter(Boolean);
+  while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words.shift();
+  return { line: words.join(" "), words };
+}
+
+const BOOKKEEPING = /\/api\/canvas\/|canvas_(set|patch|get)\b/;
+
+/**
+ * The rules table, first match wins. The fallback is always the raw first line, so a wrong guess never hides the truth.
+ * Each rule gives the present-tense label (running), the past tense (for "Last: …") and the muted target chip.
+ */
+export function classifyActivity(a: { kind: ActivityKind; name: string; command?: string; path?: string; url?: string; query?: string }): Classified {
+  const mk = (icon: string, label: string, past: string, target: string | null = null, bookkeeping = false): Classified => ({ icon, label, past, target, bookkeeping });
+  if ((a.command && BOOKKEEPING.test(a.command)) || BOOKKEEPING.test(a.name)) return mk("LayoutDashboard", "Updating canvas", "Updated canvas", "POST /api/canvas/…", true);
+  switch (a.kind) {
+    case "shell": {
+      const command = a.command ?? "";
+      const { line, words } = shellHead(command);
+      const w0 = words[0] ?? "", w1 = words[1] ?? "";
+      if (/^(npm|pnpm|yarn|bun)$/.test(w0) && (w1 === "test" || (w1 === "run" && /^test/.test(words[2] ?? ""))) || /^(pytest|vitest|jest)$/.test(w0) || (/^(go|cargo)$/.test(w0) && w1 === "test") || (w0 === "node" && w1 === "--test")) return mk("FlaskConical", "Running tests", "Ran tests", shortTarget(line));
+      if (w0 === "git" || w0 === "gh") return mk("GitBranch", `Git: ${w1 || w0}`, `Git: ${w1 || w0}`, shortTarget(words.slice(2).join(" ")) || null);
+      const interp = /^(python3?|node|bun|bash|sh)$/.test(w0) && /^-?$/.test(w1) && /<<-?\s*['"]?\w+/.test(line + " " + command.split("\n")[0]) ? w0 : null;
+      if (interp) {
+        const lines = command.split("\n");
+        const body = Math.max(1, lines.length - (/^\s*\w+\s*$/.test(lines[lines.length - 1]) ? 2 : 1));
+        const kind = interp.startsWith("python") ? "Python" : interp === "node" || interp === "bun" ? "Node" : "shell";
+        return mk("SquareTerminal", `Running a ${kind} script`, `Ran a ${kind} script`, `${interp} · ${body} line${body === 1 ? "" : "s"}`);
+      }
+      const wf = /^(?:cat\s*>>?\s*(\S+)|tee\s+(?:-a\s+)?(\S+))/.exec(line);
+      if (wf && /<<-?/.test(command.split("\n")[0])) { const f = (wf[1] ?? wf[2]).replace(/^['"]|['"]$/g, ""); return mk("FilePen", `Writing ${base(f)}`, `Wrote ${base(f)}`, dir(f)); }
+      if ((/^(npm|pnpm|yarn|bun)$/.test(w0) && /^(install|i|add)$/.test(w1)) || (/^pip3?$/.test(w0) && w1 === "install")) return mk("Package", "Installing packages", "Installed packages", shortTarget(line));
+      const sl = /^sleep\s+(\d+(?:\.\d+)?)$/.exec(line);
+      if (sl && !command.trim().includes("\n")) return mk("Hourglass", `Waiting ${sl[1]}s`, `Waited ${sl[1]}s`);
+      return mk("SquareTerminal", `Running ${w0 || "a command"}`, `Ran ${w0 || "a command"}`, shortTarget(line) || null);
+    }
+    case "edit": return mk("Pencil", `Editing ${base(a.path ?? "")}`, `Edited ${base(a.path ?? "")}`, dir(a.path ?? ""));
+    case "write": return mk("Pencil", `Writing ${base(a.path ?? "")}`, `Wrote ${base(a.path ?? "")}`, dir(a.path ?? ""));
+    case "read": return mk("Eye", `Reading ${base(a.path ?? "")}`, `Read ${base(a.path ?? "")}`, dir(a.path ?? ""));
+    case "search": return mk("Search", "Searching", "Searched", a.query ? shortTarget(a.query) : null);
+    case "fetch": {
+      let host = a.url ?? "", rest: string | null = null;
+      try { const u = new URL(a.url ?? ""); host = u.host; rest = `${u.pathname}${u.search}` === "/" ? null : shortTarget(`${u.pathname}${u.search}`); } catch { /* keep the raw url */ }
+      return mk("Globe", `Fetching ${host}`, `Fetched ${host}`, rest);
+    }
+    default: {
+      const m = /^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/.exec(a.name);
+      const label = m ? `${m[1]}: ${m[2]}` : oneLine(a.name, 40);
+      return mk("Wrench", label, label);
+    }
+  }
+}

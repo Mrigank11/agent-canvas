@@ -1,8 +1,8 @@
 // The browser's primitives: the same set as client/ui/atoms.tsx, as string functions, plus the CSS custom
 // properties generated from shared/ui-spec.ts. No colour is written by hand in the component CSS: it only uses var(--…).
 import type { StepState } from "../shared/canvas.ts";
-import type { FlagPlan, StatusPlan } from "../shared/plan.ts";
-import { BASE, SIGNAL, STEP_GLYPH, TONES, tokensFixed, type Delta, type Tone } from "../shared/ui-spec.ts";
+import type { ActivityPlan, FlagPlan, StatusPlan } from "../shared/plan.ts";
+import { ACTIVITY_ICONS, BASE, SIGNAL, STEP_GLYPH, TONES, tokensFixed, type Delta, type Tone } from "../shared/ui-spec.ts";
 
 export const esc = (s: unknown) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -50,11 +50,39 @@ export const linkButton = (variant: "primary" | "secondary" | "ghost", label: st
   `<a class="btn ${variant}" href="${esc(href)}"${newTab ? ' target="_blank" rel="noopener noreferrer"' : ""}>${esc(label)}</a>`;
 export const flagLine = (f: FlagPlan) => `<div class="flag ${f.signal}">${glyphCircle(f.signal, f.glyph)}<span>${esc(f.text)}</span></div>`;
 
+/** Lucide path data for each icon the Now row can use (Paseo draws the same names natively). */
+export const ICON_SVG: Record<(typeof ACTIVITY_ICONS)[number], string> = {
+  LayoutDashboard: '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
+  FlaskConical: '<path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/>',
+  GitBranch: '<line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+  SquareTerminal: '<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2"/>',
+  FilePen: '<path d="M12.5 22H18a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v9.5"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M13.378 15.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/>',
+  Package: '<path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><polyline points="3.29 7 12 12 20.71 7"/><path d="m7.5 4.27 9 5.15"/>',
+  Hourglass: '<path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/>',
+  Pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+  Eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
+  Search: '<path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/>',
+  Globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  Wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+};
+const icon = (name: string) => `<svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_SVG[name as keyof typeof ICON_SVG] ?? ICON_SVG.Wrench}</svg>`;
+
+/** The Now row. A <details> element, so tapping it opens the full command and the trail with no script (and the page's poll keeps it open). */
+export function activityRow(a: ActivityPlan): string {
+  const glyph = a.live ? `<span class="tg ${a.tone}">${icon(a.icon)}</span>` : '<span class="tg ring"></span>';
+  const head = `${glyph}<span class="nt"><span class="nl">${esc(a.label)}</span>${a.target ? `<span class="mchip">${esc(a.target)}</span>` : ""}</span><span class="el ${a.tone}">${esc(a.elapsed)}</span>`;
+  const cls = `now ${a.live ? a.tone : "idle"}${a.bookkeeping ? " book" : ""}`;
+  if (!a.full && !a.recent.length) return `<div class="${cls}">${head}</div>`;
+  const well = a.full ? `<div class="well">${a.full.split("\n").map((l) => `<span>${esc(l || " ")}</span>`).join("")}</div>` : "";
+  const trail = a.recent.length ? `<ul class="trail">${a.recent.map((r) => `<li class="${r.ok ? "ok" : "err"}"><i class="tdot"></i>${esc(r.label)}${!r.ok && r.exitCode != null ? ` · exit ${r.exitCode}` : ""}</li>`).join("")}</ul>` : "";
+  return `<details class="nowd" data-k="now"><summary class="${cls}">${head}<span class="caret">›</span></summary><div class="nowx">${well}${trail}</div></details>`;
+}
+
 /** Paseo's own line. Facts are Paseo's; the agent cannot write into it. */
 export function statusLine(p: StatusPlan): string {
   const facts = p.facts.map((f) => `<span${f.signal ? ` class="c-${f.signal}"` : ""}>${esc(f.text)}</span>`);
   const l2 = [...(p.lead ? [`<b class="c-hot">${esc(p.lead)}</b>`] : []), ...facts].join('<span class="sep"> · </span>');
-  return `<div class="statusline"><div class="l1">${badge(p.signal, p.label, p.signal === "ok" ? "check" : "dot")}${meta(p.run)}</div><div class="meta l2">${l2}</div>${p.flags.map(flagLine).join("")}</div>`;
+  return `<div class="statusline"><div class="l1">${badge(p.signal, p.label, p.signal === "ok" ? "check" : "dot")}${meta(p.run)}</div>${p.activity ? activityRow(p.activity) : ""}<div class="meta l2">${l2}</div>${p.flags.map(flagLine).join("")}</div>`;
 }
 
 // ---------- component CSS (var(--…) only) ----------
@@ -115,6 +143,22 @@ a{color:var(--run-t);text-decoration:none}a:hover{text-decoration:underline}
 .gc.solid.run{background:var(--run);color:var(--bg)}.gc.solid.warn{background:var(--warn);color:var(--bg)}.gc.solid.err{background:var(--err);color:var(--bg)}.gc.solid.ok{background:var(--ok);color:var(--bg)}
 .chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;font-size:13px;font-weight:500;align-self:flex-start}.chip.ok{background:var(--ok-w);color:var(--ok-t)}
 .divider{height:1px;background:var(--line)}
+.nowd>summary{list-style:none}.nowd>summary::-webkit-details-marker{display:none}
+.now{display:flex;align-items:center;gap:10px;min-height:32px;padding:4px 8px;margin:0 -8px;border-radius:8px}
+details .now{cursor:pointer}details .now:hover,details[open]>.now{background:var(--raised)}
+.tg{width:24px;height:24px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.tg.run{background:var(--run-w);color:var(--run-t)}.tg.idle{background:var(--well);color:var(--muted)}
+.tg.ring{background:none;box-shadow:inset 0 0 0 1.5px var(--line-strong);width:12px;height:12px;margin:0 6px;border-radius:6px}
+.nt{display:flex;flex-direction:column;min-width:0;flex:1}
+.nl{font-size:14px;line-height:18px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.now.idle .nl{color:var(--muted);font-weight:400}
+.mchip{font:11.5px/16px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.el{font-size:12px;font-weight:500;white-space:nowrap;margin-left:auto;flex:none}.el.run{color:var(--run-t)}.el.idle{color:var(--faint)}
+.caret{color:var(--faint);font-size:16px;line-height:1;width:10px;text-align:center;flex:none}details[open] .caret{transform:rotate(90deg)}
+.nowx{display:flex;flex-direction:column;gap:10px;padding-top:6px}
+.nowx .well{font-size:11.5px;line-height:17px;max-height:calc(8*17px + 16px);overflow:auto}
+.trail{list-style:none;margin:0;padding:0}.trail li{display:flex;align-items:center;gap:10px;font-size:12px;line-height:16px;color:var(--muted);padding:3px 0}
+.tdot{width:8px;height:8px;border-radius:4px;flex:none}.trail .ok .tdot{background:var(--ok-w);box-shadow:inset 0 0 0 1.5px var(--ok)}.trail .err{color:var(--err-t)}.trail .err .tdot{background:var(--err)}
 .list .row{display:flex;flex-direction:column;gap:4px;padding:14px 12px;margin:0 -12px;border-radius:8px;border-bottom:1px solid var(--line);color:inherit;text-decoration:none}.list .row:last-child{border-bottom:0}.list .row:hover{background:var(--raised);text-decoration:none}
 .list .row.need{background:var(--hot-w);border-bottom-color:transparent}.list .row.dim{opacity:.55}
 .list .row .l1{display:flex;align-items:center;gap:10px}.list .row .l1 b{font-weight:600;min-width:0}.list .row .sp{flex:1}.list .row .ind{padding-left:18px}.list .row .bl{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.list .row.need .bl{color:var(--fg)}

@@ -5,7 +5,7 @@ import { chartPoints, type Node, type StepState } from "./canvas.ts";
 import { checkHonesty, summarize, type Verdict } from "./honesty.ts";
 import type { CanvasView } from "./contract.ts";
 import { pillState } from "./pill.ts";
-import { FLAG_GLYPH, NOTE_GLYPH, oneLine, STEP_GLYPH, TONES, ago, bestCells, flagSignal, isNumericColumn, metricSignal, noteSignal, parseDelta, runSignal, signalFor, stepSignal, visibleFlags, type Delta, type Tone } from "./ui-spec.ts";
+import { FLAG_GLYPH, LAST_VISIBLE_MS, NOTE_GLYPH, STEP_GLYPH, TONES, ago, bestCells, classifyActivity, oneLine, flagSignal, isNumericColumn, metricSignal, noteSignal, parseDelta, runSignal, signalFor, stepSignal, visibleFlags, type Delta, type Tone } from "./ui-spec.ts";
 
 export type StepPlan = { id: string; state: StepState; text: string; glyph: string; signal: Tone };
 export type MetricPlan = { id: string; label: string; head: string; valueSignal: Tone | null; delta: Delta | null };
@@ -92,6 +92,36 @@ export function planBlocks(root: Node, only?: ReadonlySet<string>): BlockPlan[] 
 // ---------- the status line and the per-agent view ----------
 
 export type FlagPlan = { signal: "warn" | "err"; glyph: string; text: string };
+/** The Now row. `live`: a call is running (elapsed ticks). Otherwise it is the quiet "Last: …" line, hidden after 10 minutes. */
+export type ActivityPlan = {
+  live: boolean;
+  /** run = blue and ticking; idle = grey (idle agent, or the agent's own canvas bookkeeping) */
+  tone: "run" | "idle";
+  icon: string;
+  label: string;
+  target: string | null;
+  /** "12s" while live, "2m 3s ago" for the last action */
+  elapsed: string;
+  bookkeeping: boolean;
+  /** The full command, path, URL or query, for the expanded state. */
+  full: string | null;
+  /** The last three finished actions, newest first. */
+  recent: { label: string; ok: boolean; exitCode: number | null }[];
+};
+
+export function activityPlan(view: Pick<CanvasView, "activity" | "recent">, now: number): ActivityPlan | null {
+  const recent = (view.recent ?? []).map((r) => ({ label: r.label, ok: r.ok, exitCode: r.exitCode ?? null }));
+  const a = view.activity;
+  if (a) {
+    const c = classifyActivity(a);
+    return { live: true, tone: c.bookkeeping ? "idle" : "run", icon: c.icon, label: c.label, target: c.target, elapsed: ago(now - a.startedAt), bookkeeping: c.bookkeeping, full: a.command ?? a.path ?? a.url ?? a.query ?? null, recent };
+  }
+  const last = view.recent?.[0];
+  if (!last || now - last.endedAt > LAST_VISIBLE_MS) return null;
+  return { live: false, tone: "idle", icon: iconForKind(last.kind), label: `Last: ${last.label}`, target: null, elapsed: `${ago(now - last.endedAt)} ago`, bookkeeping: false, full: null, recent };
+}
+const iconForKind = (k: string) => (k === "shell" ? "SquareTerminal" : k === "edit" || k === "write" ? "Pencil" : k === "read" ? "Eye" : k === "search" ? "Search" : k === "fetch" ? "Globe" : "Wrench");
+
 export type StatusPlan = {
   signal: Tone;
   label: Verdict["label"];
@@ -102,15 +132,19 @@ export type StatusPlan = {
   facts: { text: string; signal?: Tone }[];
   flags: FlagPlan[];
   dim: boolean;
+  /** The Now row, or null when the agent has been quiet for 10 minutes. */
+  activity: ActivityPlan | null;
 };
 
-export function statusPlan(view: Pick<CanvasView, "tree" | "runState" | "updatedAt" | "callsNow" | "callsAtUpdate" | "currentTool" | "lastActivityAt">, now: number, runOverride?: CanvasView["runState"]): StatusPlan {
+export function statusPlan(view: Pick<CanvasView, "tree" | "runState" | "updatedAt" | "callsNow" | "callsAtUpdate" | "currentTool" | "lastActivityAt" | "activity" | "recent">, now: number, runOverride?: CanvasView["runState"]): StatusPlan {
   const run = runOverride ?? view.runState;
   const calls = Math.max(0, view.callsNow - view.callsAtUpdate);
   const verdict = checkHonesty(view.tree, { runState: run, canvasUpdatedAt: view.updatedAt, toolCallsSinceUpdate: calls, now });
   const asks = summarize(view.tree).openAsks;
   const facts: StatusPlan["facts"] = [];
-  if (view.currentTool) facts.push({ text: `running ${oneLine(view.currentTool)}`, signal: "run" });
+  const activity = activityPlan(view, now);
+  // the Now row says what is running; the old one-line fact stays only for a view that carries no structured activity
+  if (view.currentTool && !view.activity) facts.push({ text: `running ${oneLine(view.currentTool)}`, signal: "run" });
   facts.push({ text: `active ${ago(now - view.lastActivityAt)} ago` });
   facts.push({ text: view.updatedAt == null ? "canvas never written (auto canvas)" : `canvas updated ${ago(now - view.updatedAt)} ago` });
   facts.push({ text: `${calls} tool call${calls === 1 ? "" : "s"} since` });
@@ -122,6 +156,7 @@ export function statusPlan(view: Pick<CanvasView, "tree" | "runState" | "updated
     facts,
     flags: visibleFlags(verdict.flags).map((f) => ({ signal: flagSignal(f), glyph: FLAG_GLYPH[flagSignal(f)], text: f.text })),
     dim: verdict.dim,
+    activity,
   };
 }
 

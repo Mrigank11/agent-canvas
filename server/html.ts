@@ -73,7 +73,7 @@ export function renderIndex(views: CanvasView[], now: number): string {
 
 const SCRIPT = `
 const root=document.getElementById('root');const url=root.dataset.frag;
-async function tick(){try{const r=await fetch(url,{cache:'no-store'});if(r.ok){const h=await r.text();if(h!==root.dataset.last){root.innerHTML=h;root.dataset.last=h}}}catch(e){}}
+async function tick(){try{const r=await fetch(url,{cache:'no-store'});if(r.ok){const h=await r.text();if(h!==root.dataset.last){const o=[...root.querySelectorAll('details[open]')].map(d=>d.dataset.k);root.innerHTML=h;root.dataset.last=h;o.forEach(k=>{const d=root.querySelector('details[data-k="'+k+'"]');if(d)d.setAttribute('open','')})}}}catch(e){}}
 setInterval(tick,1500);tick();
 document.addEventListener('click',async e=>{const b=e.target.closest('button[data-ask]');if(!b)return;b.disabled=true;
 const r=await fetch('/api/answer',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({agentId:b.dataset.agent,askId:b.dataset.ask,value:b.dataset.value})});

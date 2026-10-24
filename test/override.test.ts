@@ -193,6 +193,9 @@ test("it starts reading as soon as the agent gets an override, and stops when it
   h.noteAgent("a1", "x");
   h.setOverride("a1", "on", "env");
   await wait(40);
+  assert.equal(st.refetch, 0); // an env override arrives while the agent is still being created: not read yet
+  h.noteAgent("a1", "x"); // agent.created
+  await wait(40);
   assert.ok(st.refetch >= 1);
   const before = st.refetch;
   h.setOverride("a1", "off", "runtime");

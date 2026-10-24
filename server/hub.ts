@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { autoCanvas, type AutoItem } from "../shared/auto.ts";
-import { oneLine } from "../shared/ui-spec.ts";
+import { classifyActivity, oneLine, type ActivityCall, type RecentCall } from "../shared/ui-spec.ts";
 import { findNode, parseCanvas, patchCanvas, serialize, walk, type Node, type PatchOp } from "../shared/canvas.ts";
 import { REANCHOR_AFTER, ROW_ID, ROW_KIND, ROW_VERSION, type CanvasView } from "../shared/contract.ts";
 import type { RunState } from "../shared/honesty.ts";
@@ -18,7 +18,7 @@ type Item = Page["entries"][number]["item"];
 /** What the agent wrote and when. */
 type Authored = { source: Node; updatedAt: number; callsAtUpdate: number };
 /** What Paseo says. */
-type Live = { title: string | null; workspaceId: string | null; runState: RunState; callIds: Set<string>; items: AutoItem[]; currentTool: string | null; lastActivityAt: number; seq: number };
+type Live = { activity: ActivityCall | null; recent: RecentCall[]; seenRunning: Map<string, number>; seenDone: Map<string, number>; loaded: boolean; title: string | null; workspaceId: string | null; runState: RunState; callIds: Set<string>; items: AutoItem[]; currentTool: string | null; lastActivityAt: number; seq: number };
 
 export type HubOptions = { log: (m: string) => void; stateFile: string | null; publicBase: string; localBase: string; agentLink?: (agentId: string) => string | null;
   /** The current host-wide settings. */
@@ -39,6 +39,21 @@ function toolLabel(c: Extract<Item, { type: "tool_call" }>): { label: string; fi
     case "search": return { label: oneLine(`Search ${d.query}`) };
     case "fetch": return { label: oneLine(`Fetch ${d.url}`) };
     default: return { label: oneLine(c.name.replace(/^mcp__/, "").replace(/__/g, ":")) };
+  }
+}
+
+const MAX_COMMAND = 4000;
+/** A tool call as the Now row wants it: kind and the raw fields, not a flattened label. */
+export function rawCall(c: Extract<Item, { type: "tool_call" }>): Omit<ActivityCall, "startedAt"> & { exitCode?: number | null } {
+  const d = c.detail;
+  switch (d.type) {
+    case "shell": return { kind: "shell", name: c.name, command: d.command.slice(0, MAX_COMMAND), exitCode: d.exitCode };
+    case "read": return { kind: "read", name: c.name, path: d.filePath };
+    case "edit": return { kind: "edit", name: c.name, path: d.filePath };
+    case "write": return { kind: "write", name: c.name, path: d.filePath };
+    case "search": return { kind: "search", name: c.name, query: d.query };
+    case "fetch": return { kind: "fetch", name: c.name, url: d.url };
+    default: return { kind: "other", name: c.name };
   }
 }
 
@@ -183,7 +198,8 @@ export class Hub {
     if (value) map.set(agentId, value); else map.delete(agentId);
     this.persist();
     this.changed(agentId);
-    if (this.resolved(agentId).show) void this.refresh(agentId);
+    // an env override arrives while the agent is still being created: it does not exist to read yet (agent.created reads it)
+    if (source !== "env" && this.resolved(agentId).show) void this.refresh(agentId);
     void this.ensureTools(agentId, source === "runtime");
   }
 
@@ -283,7 +299,7 @@ export class Hub {
   private callCount(agentId: string) { return this.live.get(agentId)?.callIds.size ?? 0; }
   private liveFor(agentId: string): Live {
     let l = this.live.get(agentId);
-    if (!l) this.live.set(agentId, (l = { title: null, workspaceId: null, runState: "idle", callIds: new Set(), items: [], currentTool: null, lastActivityAt: this.now(), seq: 0 }));
+    if (!l) this.live.set(agentId, (l = { activity: null, recent: [], seenRunning: new Map(), seenDone: new Map(), loaded: false, title: null, workspaceId: null, runState: "idle", callIds: new Set(), items: [], currentTool: null, lastActivityAt: this.now(), seq: 0 }));
     return l;
   }
 
@@ -335,6 +351,7 @@ export class Hub {
       }
       for (const it of items) if (it.type === "tool_call" && !/canvas_(set|patch|get)/.test(it.name)) l.callIds.add(it.callId);
       l.seq = page.window?.maxSeq ?? l.seq;
+      this.trackCalls(l, items);
       l.items = toAutoItems(items);
       const running = [...l.items].reverse().find((i) => i.kind === "tool" && i.status === "running");
       l.currentTool = running?.kind === "tool" ? running.label : null;
@@ -342,10 +359,39 @@ export class Hub {
       this.changed(agentId);
     } catch (e) {
       const n = (this.fails.get(agentId)?.n ?? 0) + 1;
-      // 30 s, 1 min, 2 min ... capped at 15 min; the log line appears for the first failure only
-      this.fails.set(agentId, { n, retryAt: this.now() + Math.min(30_000 * 2 ** (n - 1), 15 * 60_000) });
+      // 3 s (an agent still being created), then 30 s, 1 min, 2 min ... capped at 15 min; only the first failure is logged
+      this.fails.set(agentId, { n, retryAt: this.now() + (n === 1 ? 3_000 : Math.min(30_000 * 2 ** (n - 2), 15 * 60_000)) });
       if (n === 1) this.o.log(`refresh ${agentId} failed (retrying with backoff, not logged again): ${(e as Error).message}`);
     } finally { this.busy.delete(agentId); }
+  }
+
+  /**
+   * The Now row's data. Timeline items carry no timestamps, so the hub stamps the first time it sees a call running
+   * (startedAt, good to about the poll interval) and the first time it sees one finished (endedAt). Calls already finished
+   * when an agent is first read are stamped with the agent's last activity, not "now".
+   */
+  private trackCalls(l: Live, items: readonly Item[]) {
+    // Claude's own task notifications are not actions the agent took
+    const calls = items.filter((i): i is Extract<Item, { type: "tool_call" }> => i.type === "tool_call" && !/^task_?notification$/i.test(i.name.replace(/\s+/g, "_")));
+    const first = !l.loaded;
+    l.loaded = true;
+    const t = this.now();
+    for (const c of calls) {
+      if (c.status === "running") { if (!l.seenRunning.has(c.callId)) l.seenRunning.set(c.callId, t); }
+      else if (!l.seenDone.has(c.callId)) l.seenDone.set(c.callId, first ? l.lastActivityAt : t);
+    }
+    const running = [...calls].reverse().find((c) => c.status === "running");
+    l.activity = running ? { ...rawCall(running), startedAt: l.seenRunning.get(running.callId) ?? t } : null;
+    l.recent = [...calls]
+      .filter((c) => c.status !== "running")
+      .reverse()
+      .map((c) => ({ c, raw: rawCall(c) }))
+      .filter(({ raw }) => !classifyActivity(raw).bookkeeping)
+      .slice(0, 3)
+      .map(({ c, raw }) => ({ kind: raw.kind, label: classifyActivity(raw).past, ok: c.status === "completed" && (raw.exitCode == null || raw.exitCode === 0), exitCode: raw.exitCode ?? null, endedAt: l.seenDone.get(c.callId) ?? t }));
+    // bounded: forget calls that fell out of the 200-item window
+    if (l.seenRunning.size > 400) for (const k of [...l.seenRunning.keys()].slice(0, 200)) l.seenRunning.delete(k);
+    if (l.seenDone.size > 400) for (const k of [...l.seenDone.keys()].slice(0, 200)) l.seenDone.delete(k);
   }
 
   private async tick() {
@@ -381,6 +427,8 @@ export class Hub {
       callsNow: l.callIds.size,
       runState: l.runState,
       currentTool: l.currentTool,
+      activity: l.activity,
+      recent: l.recent,
       lastActivityAt: l.lastActivityAt,
       url: `${this.o.publicBase}/a/${agentId}`,
       agentUrl: this.o.agentLink?.(agentId) ?? null,
