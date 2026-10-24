@@ -22,6 +22,7 @@ export const SHOWCASE = `<Canvas title="Block showcase" status="working">
   <Link href="https://paseo.sh">Paseo</Link>
   <Note tone="warn">Careful.</Note><Note tone="success">Fine.</Note>
   <Code lang="sh">echo hi</Code>
+  <Grid id="g" cols={2}><Metric label="Left" value="1" /><Collapse id="c" title="Details" open><Bluf>Inside</Bluf></Collapse></Grid>
 </Canvas>`;
 
 export const showcaseTree = () => { const r = parseCanvas(SHOWCASE); assert.ok(r.ok); return r.ok ? r.root : (null as never); };
@@ -29,7 +30,7 @@ export const viewOf = (tree = showcaseTree(), o: Partial<CanvasView> = {}): Canv
 
 test("a canvas plans to one entry per block, with runs of metrics merged", () => {
   const plans = planBlocks(showcaseTree());
-  assert.deepEqual(plans.map((p) => p.kind), ["bluf", "steps", "progress", "metrics", "decision", "ask", "diff", "chart", "svg", "image", "markdown", "markdown", "markdown", "markdown", "markdown"]);
+  assert.deepEqual(plans.map((p) => p.kind), ["bluf", "steps", "progress", "metrics", "decision", "ask", "diff", "chart", "svg", "image", "markdown", "markdown", "markdown", "markdown", "markdown", "grid"]);
   assert.equal(plans.find((p) => p.kind === "metrics" && p.items.length === 3) !== undefined, true);
 });
 

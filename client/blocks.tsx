@@ -2,9 +2,10 @@
 import { useRpc } from "@getpaseo/plugin/client";
 import { createContext, useContext, useEffect, useState } from "react";
 import * as RN from "react-native";
-import { Text, View, useWindowDimensions } from "react-native";
+import { Pressable, Text, View, useWindowDimensions } from "react-native";
 import { planBlocks, type BlockPlan } from "../shared/plan";
 import { answerRpc, assetRpc } from "../shared/contract";
+import { GRID_GAP, SPACE, gridColumns } from "../shared/ui-spec";
 import { Bar, Button, Chip, DeltaChip, GlyphCircle, Hairline, Meta, Region, Section, SectionLabel, Sheet, StatusDot, StepRow, Txt, Well } from "./ui/atoms";
 import { ink, typeStyle, useT } from "./ui/tokens";
 import { openUrl } from "./common";
@@ -244,6 +245,38 @@ function Chart({ plan }: { plan: Extract<BlockPlan, { kind: "chart" }> }) {
   );
 }
 
+/** A Grid: `cols` columns on a wide surface, one on a compact one (the rule is gridColumns in shared/ui-spec). */
+function GridView({ plan, agentId, askVariant, dense }: { plan: Extract<BlockPlan, { kind: "grid" }>; agentId: string; askVariant?: "panel" | "flat"; dense?: boolean }) {
+  const { width } = useWindowDimensions();
+  const cols = gridColumns(plan.cols, width);
+  const rows: BlockPlan[][] = [];
+  for (let i = 0; i < plan.children.length; i += cols) rows.push(plan.children.slice(i, i + cols));
+  return (
+    <View style={{ gap: GRID_GAP }}>
+      {rows.map((r, i) => (
+        <View key={i} style={{ flexDirection: "row", gap: GRID_GAP, alignItems: "flex-start" }}>
+          {r.map((c) => <View key={c.id} style={{ flex: 1, minWidth: 0 }}><BlockView plan={c} agentId={agentId} askVariant={askVariant} dense={dense} /></View>)}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function CollapseView({ plan, agentId, askVariant, dense }: { plan: Extract<BlockPlan, { kind: "collapse" }>; agentId: string; askVariant?: "panel" | "flat"; dense?: boolean }) {
+  const t = useT();
+  const [open, setOpen] = useState(plan.open);
+  useEffect(() => { if (plan.open) setOpen(true); }, [plan.open]); // a question that arrives inside opens it
+  return (
+    <View style={{ borderWidth: 1, borderColor: t.line, borderRadius: 10, paddingHorizontal: 12 }}>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 9 }}>
+        <Text style={[typeStyle("body"), { color: t.muted, width: 10 }]}>{open ? "⌄" : "›"}</Text>
+        <Txt weight="500">{plan.title}</Txt>
+      </Pressable>
+      {open ? <View style={{ gap: SPACE.block, paddingTop: 4, paddingBottom: 12 }}>{plan.children.map((c) => <BlockView key={c.id} plan={c} agentId={agentId} askVariant={askVariant} dense={dense} />)}</View> : null}
+    </View>
+  );
+}
+
 export function BlockView({ plan, agentId, askVariant, dense }: { plan: BlockPlan; agentId: string; askVariant?: "panel" | "flat"; /** steps without their tick strip (the popover shows it in its header) */ dense?: boolean }) {
   const t = useT();
   switch (plan.kind) {
@@ -280,6 +313,8 @@ export function BlockView({ plan, agentId, askVariant, dense }: { plan: BlockPla
     case "markdown": return <View style={{ gap: 8 }}>{plan.blocks.map((b, i) => <MdBlockView key={i} b={b} />)}</View>;
     case "svg": return <AssetImage hash={plan.hash} w={plan.w} h={plan.h} alt={plan.alt} label="Drawing" />;
     case "image": return <AssetImage hash={plan.hash} w={plan.w} h={plan.h} alt={plan.alt} label="Image" />;
+    case "grid": return <GridView plan={plan} agentId={agentId} askVariant={askVariant} dense={dense} />;
+    case "collapse": return <CollapseView plan={plan} agentId={agentId} askVariant={askVariant} dense={dense} />;
   }
 }
 

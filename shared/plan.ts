@@ -21,6 +21,9 @@ export type BlockPlan =
   | { kind: "diff"; id: string; file: string | null; add: number; del: number; lines: DiffLine[] }
   | { kind: "chart"; id: string; label: string | null; line: boolean; points: { label: string; value: number }[] }
   | { kind: "markdown"; id: string; blocks: MdBlock[] }
+  /** Layout: `cols` is the wide-screen count (a compact surface draws one). `open` is forced when an unanswered Ask is inside. */
+  | { kind: "grid"; id: string; cols: number; children: BlockPlan[] }
+  | { kind: "collapse"; id: string; title: string; open: boolean; children: BlockPlan[] }
   /** `hash`: the server's artefact for it (null when the client was given the raw tree, or the artefact is gone: drawn as `alt`). */
   | { kind: "svg"; id: string; hash: string | null; alt: string; w: number; h: number }
   | { kind: "image"; id: string; hash: string | null; alt: string; src: string; w: number; h: number };
@@ -72,21 +75,34 @@ export function planBlock(n: Node): BlockPlan | null {
     }
     case "Svg": return { kind: "svg", id: n.id, alt: String(n.attrs.alt ?? ""), ...assetOf(n.attrs) };
     case "Image": return { kind: "image", id: n.id, alt: String(n.attrs.alt ?? ""), src: String(n.attrs.src), ...assetOf(n.attrs) };
+    case "Grid": return { kind: "grid", id: n.id, cols: Math.max(1, Math.min(3, Number(n.attrs.cols ?? 2) || 2)), children: planBlocks(n) };
+    case "Collapse": return { kind: "collapse", id: n.id, title: String(n.attrs.title), open: n.attrs.open === true || hasOpenAsk(n), children: planBlocks(n) };
     default: return null;
   }
 }
 
-/** The canvas's blocks in order, with runs of Metrics merged into one row. */
+const LAYOUT_TAGS = new Set(["Grid", "Collapse"]);
+const hasOpenAsk = (n: Node): boolean => (n.tag === "Ask" && !n.attrs.answer) || n.children.some(hasOpenAsk);
+
+/**
+ * The container's blocks in order, with runs of Metrics merged into one row. With `only` (the timeline, popover and
+ * pill show a few kinds) layout containers are transparent: what they hold is hoisted, so a Steps or Ask inside a
+ * Grid is still shown there.
+ */
 export function planBlocks(root: Node, only?: ReadonlySet<string>): BlockPlan[] {
   const out: BlockPlan[] = [];
-  for (const c of root.children) {
-    if (only && !only.has(c.tag)) continue;
+  const add = (c: Node) => {
+    if (only && !only.has(c.tag)) {
+      if (LAYOUT_TAGS.has(c.tag)) c.children.forEach(add);
+      return;
+    }
     const p = planBlock(c);
-    if (!p) continue;
+    if (!p) return;
     const last = out[out.length - 1];
     if (p.kind === "metrics" && last?.kind === "metrics") last.items.push(...p.items);
     else out.push(p);
-  }
+  };
+  root.children.forEach(add);
   return out;
 }
 

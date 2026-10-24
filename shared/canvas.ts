@@ -35,9 +35,11 @@ type TagSpec = {
   parents?: readonly string[];
 };
 
-export const BLOCKS = ["Bluf", "Steps", "Progress", "Metric", "Decision", "Ask", "Markdown", "Svg", "Image", "Diff", "Chart", "Table", "Link", "Note", "Code"] as const;
+export const BLOCKS = ["Bluf", "Steps", "Progress", "Metric", "Decision", "Ask", "Markdown", "Svg", "Image", "Diff", "Chart", "Table", "Link", "Note", "Code", "Grid", "Collapse"] as const;
 /** Retired in v3: still parsed for one release, then converted to a Markdown node (see `convertRetired`). */
 export const RETIRED = ["Table", "Link", "Note", "Code"] as const;
+/** <Grid cols>: 1 to this many columns. */
+export const LAYOUT_MAX_COLS = 3;
 export const TONES = ["info", "warn", "error", "success"] as const;
 export const STEP_STATES = ["pending", "active", "done", "failed", "skipped"] as const;
 export type StepState = (typeof STEP_STATES)[number];
@@ -49,6 +51,8 @@ export const VOCABULARY: Record<string, TagSpec> = {
     children: BLOCKS,
     text: false,
   },
+  Grid: { attrs: { cols: { type: "number" } }, children: BLOCKS, text: false },
+  Collapse: { attrs: { title: { type: "string", required: true, max: 120 }, open: { type: "boolean" } }, children: BLOCKS, text: false },
   Bluf: { attrs: {}, children: [], text: true },
   Steps: { attrs: { title: { type: "string", max: 80 } }, children: ["Step"], text: false },
   Step: { attrs: { state: { type: "enum", values: STEP_STATES, required: true } }, children: [], text: true, parents: ["Steps"] },
@@ -70,7 +74,7 @@ export const VOCABULARY: Record<string, TagSpec> = {
 };
 
 /** `rich`: Svg and Image blocks plus Markdown images; each costs a render and a cached asset. */
-export const LIMITS = { source: 96_000, nodes: 300, depth: 4, text: 4_000, rich: 8 };
+export const LIMITS = { source: 96_000, nodes: 300, depth: 5, text: 4_000, rich: 8 };
 const ID_RE = /^[a-z][a-z0-9_-]{0,31}$/i;
 const ENTITIES: Record<string, string> = { "&lt;": "<", "&gt;": ">", "&amp;": "&", "&quot;": '"', "&apos;": "'" };
 const unescape = (s: string) => s.replace(/&(lt|gt|amp|quot|apos);/g, (m) => ENTITIES[m] ?? m);
@@ -212,6 +216,7 @@ function finish(raw: RawNode, parent: string | null, depth: number, ids: Set<str
   if (ids.has(id)) { errors.push({ message: `duplicate id "${id}"`, ...where, id }); id = `${id}~${total.n}`; node.id = id; }
   ids.add(id);
   checkAttrs(spec, raw.tag, raw.attrs, errors, { ...where, id });
+  if (raw.tag === "Grid" && "cols" in raw.attrs && !(Number.isInteger(raw.attrs.cols) && Number(raw.attrs.cols) >= 1 && Number(raw.attrs.cols) <= LAYOUT_MAX_COLS)) errors.push({ message: `<Grid> cols must be a whole number from 1 to ${LAYOUT_MAX_COLS}`, ...where, id });
   for (const [k, v] of Object.entries(raw.attrs)) if (k !== "id") node.attrs[k] = v;
   if (raw.text && !spec.text) errors.push({ message: `<${raw.tag}> cannot contain text ("${raw.text.slice(0, 30)}…")`, ...where, id });
   const maxText = spec.maxText ?? LIMITS.text;
@@ -257,7 +262,8 @@ function convertRetired(root: Node, errors: Problem[]) {
     if (!md.ok) errors.push({ message: `<${n.tag}> id "${n.id}": ${md.error}`, id: n.id });
     return { tag: "Markdown", id: n.id, attrs: {}, text, children: [] };
   };
-  root.children = root.children.map((n) => {
+  const convert = (n: Node): Node => {
+    n.children = n.children.map(convert);
     switch (n.tag) {
       case "Table": return markdown(n, tableToMarkdown(String(n.attrs.cols), n.children.map((r) => r.text)));
       case "Note": return markdown(n, noteToMarkdown(n.attrs.tone as string | undefined, n.text));
@@ -265,7 +271,8 @@ function convertRetired(root: Node, errors: Problem[]) {
       case "Code": return markdown(n, codeToMarkdown(n.attrs.lang as string | undefined, n.text));
       default: return n;
     }
-  });
+  };
+  root.children = root.children.map(convert);
 }
 
 /** "a:1,b:2" → points; null when malformed. */

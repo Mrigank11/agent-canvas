@@ -14,10 +14,12 @@ export const VOCAB_DOC = `Show your work as a live canvas the human watches inst
   <Image src="out/chart.png" alt="…" />   a PNG/JPEG/WebP/GIF file inside your workspace
   <Diff file="a.ts">unified diff</Diff>
   <Chart kind="bar|line" title="…" data="label:1,label:2" />
+  <Grid cols={2}>blocks side by side (1 to 3; one column on a phone)</Grid>
+  <Collapse title="…" open>blocks folded away until tapped</Collapse>
 </Canvas>
 
 Prose, tables, code, links and callouts go in <Markdown>, written as you would anywhere else. Raw HTML in it shows as text and links must be http(s) or mailto. Markdown, Svg and Diff bodies are written as-is: no escaping inside them.
-Pictures: <Svg> takes plain SVG with a viewBox (shapes, paths, text, gradients; script, style, links and external references are removed, nothing is fetched). <Image src> and Markdown ![alt](path) show a file from your workspace only (max 3 MB, 4096 px, not a URL, not outside the folder). Max 8 pictures per canvas.
+Pictures: <Svg> takes plain SVG with a viewBox (shapes, paths, text, gradients; script, style, links and external references are removed, nothing is fetched). <Image src> and Markdown ![alt](path) show a file from your workspace only (max 3 MB, 4096 px, not a URL, not outside the folder). Max 8 pictures per canvas. Grid and Collapse hold any blocks and nest up to 5 levels deep; an unanswered <Ask> inside a Collapse opens it.
 Rules: attribute values are "strings", {numbers} or {true}/{false}. In other text write &lt; and &amp; for a literal < or &. Give an id to anything you will patch later (letters, digits, - and _).
 Keep it live: call canvas_set once at the start, then canvas_patch as each step moves (ops: {id, set:{state:"done"}}, {id, text:"new body"}, {parent, append:"<Step …>…</Step>"}, {id, remove:true}). Update at every real state change, not at the end only.
 Be honest: a Paseo-owned strip above your canvas shows your real run state, and it flags a canvas that says done while you are still running or one that has gone stale. Set status="done" only when you are finished and about to stop.

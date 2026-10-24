@@ -89,6 +89,10 @@ export const TYPE: Record<"meta" | "label" | "body" | "lede" | "ledeStrong" | "t
   mono: { size: 12, line: 18, weight: "400" },
 };
 export const SPACE = { panel: 16, block: 20, inner: 8, ask: 14 } as const;
+/** Below this width (px) a <Grid> is one column on every surface; the browser's media query and the native `gridColumns` both read it. */
+export const GRID_COMPACT_BELOW = 560;
+export const GRID_GAP = 12;
+export const gridColumns = (cols: number, width: number): number => (width < GRID_COMPACT_BELOW ? 1 : Math.max(1, Math.min(3, Math.floor(cols))));
 export const RADIUS = { control: 8, chip: 6, region: 10, card: 12 } as const;
 
 // ---------- glyphs and signal mappings ----------

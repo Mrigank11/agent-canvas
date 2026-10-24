@@ -2,7 +2,7 @@
 // properties generated from shared/ui-spec.ts. No colour is written by hand in the component CSS: it only uses var(--…).
 import type { StepState } from "../shared/canvas.ts";
 import type { ActivityPlan, BackgroundPlan, FlagPlan, JobChipPlan, JobRowPlan, StatusPlan } from "../shared/plan.ts";
-import { ACTIVITY_ICONS, BASE, SIGNAL, STEP_GLYPH, TONES, tokensFixed, type Delta, type Tone } from "../shared/ui-spec.ts";
+import { ACTIVITY_ICONS, BASE, GRID_COMPACT_BELOW, GRID_GAP, SIGNAL, STEP_GLYPH, TONES, tokensFixed, type Delta, type Tone } from "../shared/ui-spec.ts";
 
 export const esc = (s: unknown) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -168,6 +168,9 @@ a{color:var(--run-t);text-decoration:none}a:hover{text-decoration:underline}
 .md h2{font-size:18px;line-height:26px;font-weight:600}.md h3{font-size:16px;line-height:24px;font-weight:600}.md h4,.md h5,.md h6{font-size:14px;line-height:20px;font-weight:600}
 .md code{font:12px/18px var(--mono);background:var(--well);border-radius:4px;padding:1px 4px}.md .well code{background:none;padding:0}.md blockquote{border-left:2px solid var(--line-strong);padding-left:12px;color:var(--muted)}
 .md li.task{list-style:none;display:flex;gap:8px;align-items:flex-start;margin-left:-22px}.chk{width:16px;height:16px;flex:none;margin-top:2px;border-radius:4px;box-shadow:inset 0 0 0 1.5px var(--line-strong);display:inline-flex;align-items:center;justify-content:center;font-size:11px}.chk.on{background:var(--ok);color:var(--bg);box-shadow:none}
+.grid{display:grid;grid-template-columns:repeat(var(--cols,2),minmax(0,1fr));gap:${GRID_GAP}px;align-items:start}.cell{display:flex;flex-direction:column;gap:20px;min-width:0}
+@media (max-width:${GRID_COMPACT_BELOW - 1}px){.grid{grid-template-columns:minmax(0,1fr)}}
+.collapse{border:1px solid var(--line);border-radius:10px;padding:0 12px}.collapse summary{cursor:pointer;padding:9px 0;font-weight:500;list-style:none;display:flex;align-items:center;gap:8px}.collapse summary::-webkit-details-marker{display:none}.collapse summary::before{content:"›";display:inline-block;width:10px;color:var(--muted);transition:transform .12s}.collapse[open] summary::before{transform:rotate(90deg)}.collapse .cbody{display:flex;flex-direction:column;gap:20px;padding:4px 0 12px}
 .svgwrap{color:var(--fg);max-width:100%}.svgwrap svg{display:block;width:100%;max-width:640px;height:auto}.fig img{display:block;max-width:100%;height:auto;border-radius:8px}.figmiss{color:var(--muted)}
 .md .mdbody{display:flex;flex-direction:column;gap:4px;min-width:0}.md .tbl .ctr{text-align:center}.md .tbl{display:block;overflow-x:auto}
 .note.run{background:var(--run-w)}.note.warn{background:var(--warn-w)}.note.err{background:var(--err-w)}.note.ok{background:var(--ok-w)}
