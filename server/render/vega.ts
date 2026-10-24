@@ -1,19 +1,15 @@
-// Vega-Lite spec to a safe SVG, in Node with no DOM and no canvas: vega-lite compiles to a Vega spec, Vega's dataflow runs it
+// Vega-Lite spec to a safe SVG, in a worker thread with no DOM and no canvas: vega-lite compiles to a Vega spec, Vega's dataflow runs it
 // with the AST interpreter (so no Function/eval ever sees an agent expression) and its SVG string renderer draws it. Text is
-// measured by Vega's estimator since there is no canvas. The bundle is vendored (gzipped) and loaded on first use.
-import { gunzipSync } from "node:zlib";
+// measured by Vega's estimator since there is no canvas. The bundle is vendored (gzipped) and the worker starts on first use.
 import { RENDERED_LIMITS, sanitizeSvg } from "../../shared/svg.ts";
 import { checkVegaSpec } from "../../shared/vegaspec.ts";
-import { VEGA_GZ_B64 } from "../vendor/vega-bundle.ts";
+import { VEGA_WORKER_GZ_B64 } from "../vendor/vega-worker.ts";
+import { TimedWorker } from "./worker.ts";
 
-type Lib = {
-  compile: (spec: unknown, opts: { logger: unknown }) => { spec: unknown };
-  parse: (spec: unknown, config: unknown, opts: { ast: boolean }) => unknown;
-  View: new (rt: unknown, opts: { renderer: string; expr: unknown }) => { toSVG(): Promise<string>; finalize(): void };
-  expressionInterpreter: unknown;
-};
-let lib: Promise<Lib> | null = null;
-const load = () => (lib ??= import(`data:text/javascript;base64,${gunzipSync(Buffer.from(VEGA_GZ_B64, "base64")).toString("base64")}`).catch((e) => { lib = null; throw e; }) as Promise<Lib>);
+export const VEGA_TIMEOUT_MS = 5_000;
+/** In a worker with a hard timeout, like Graphviz: a spec that makes Vega spin cannot hang the plugin. */
+const pool = new TimedWorker<{ spec: unknown }, { svg?: string; warnings?: string[]; error?: string }>(VEGA_WORKER_GZ_B64, "Vega", VEGA_TIMEOUT_MS);
+const overrun = (ms: number) => `Vega-Lite took longer than ${ms / 1000} s and was stopped: the chart is too complex (fewer rows or marks, no huge bins or facets)`;
 
 /** Theme: ink is currentColor (black on light, white on dark, set by whoever draws the SVG), no background, quiet grid. */
 const INK = "currentColor";
@@ -39,24 +35,22 @@ const merge = (base: Record<string, unknown>, over: unknown): Record<string, unk
 
 export type VegaRender = { ok: true; svg: string; w: number; h: number; notes: string[] } | { ok: false; error: string };
 
-export async function renderVega(body: string): Promise<VegaRender> {
+export async function renderVega(body: string, opts: { timeoutMs?: number } = {}): Promise<VegaRender> {
   const c = checkVegaSpec(body);
   if (!c.ok) return c;
   const spec: Record<string, unknown> = { ...c.spec, config: merge(THEME, c.spec.config) };
   if (spec.width === undefined && !("layer" in spec) && !("hconcat" in spec) && !("vconcat" in spec) && !("facet" in spec) && !("repeat" in spec)) spec.width = 480;
   if (spec.height === undefined && "mark" in spec) spec.height = 240;
-  const warnings: string[] = [];
-  const logger = { level() { return this; }, warn: (...a: unknown[]) => { warnings.push(a.map(String).join(" ")); return logger; }, info: () => logger, debug: () => logger, error: (...a: unknown[]) => { warnings.push(a.map(String).join(" ")); return logger; } };
-  let raw: string;
+  let raw: string, warnings: string[];
   try {
-    const v = await load();
-    const vg = v.compile(spec, { logger }).spec;
-    const view = new v.View(v.parse(vg, null, { ast: true }), { renderer: "none", expr: v.expressionInterpreter });
-    try { raw = await view.toSVG(); } finally { view.finalize(); }
-  } catch (e) {
-    return { ok: false, error: `Vega-Lite: ${(e as Error).message.replace(/\s+/g, " ").trim().slice(0, 300)}` };
-  }
+    const r = await pool.run({ spec }, overrun, opts.timeoutMs);
+    if (r.svg === undefined) return { ok: false, error: `Vega-Lite: ${(r.error ?? "failed").replace(/\s+/g, " ").trim().slice(0, 300)}` };
+    raw = r.svg; warnings = r.warnings ?? [];
+  } catch (e) { return { ok: false, error: (e as Error).message.replace(/\s+/g, " ").trim().slice(0, 300) }; }
   const s = sanitizeSvg(raw, RENDERED_LIMITS);
   if (!s.ok) return { ok: false, error: `the chart output was refused: ${s.error}` };
   return { ok: true, svg: s.svg, w: s.w, h: s.h, notes: [...new Set(warnings)].slice(0, 3).map((w) => `Vega-Lite: ${w.slice(0, 160)}`) };
 }
+
+/** Test hook and shutdown. */
+export const stopVegaWorker = () => pool.stop();

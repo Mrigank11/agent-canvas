@@ -13,10 +13,10 @@ import { handleRpc } from "../server/mcp.ts";
 import { renderCanvas } from "../server/html.ts";
 import { Assets } from "../server/render/assets.ts";
 import { renderDot, stopDotWorker } from "../server/render/dot.ts";
-import { renderVega } from "../server/render/vega.ts";
+import { renderVega, stopVegaWorker } from "../server/render/vega.ts";
 import { viewOf } from "./plan.test.ts";
 
-after(() => stopDotWorker());
+after(() => { stopDotWorker(); stopVegaWorker(); });
 
 const canvas = (inner: string) => `<Canvas title="t">${inner}</Canvas>`;
 const parse = (inner: string) => { const r = parseCanvas(canvas(inner)); assert.ok(r.ok, r.ok ? "" : r.errors.map((e) => e.message).join()); return r.ok ? r.root : (null as never); };
@@ -131,6 +131,12 @@ test("data.url, links, images, metadata, big data and unknown properties are ref
   assert.ok(many.ok === false && /5000 inline data rows/.test(many.error));
   const compile = await renderVega('{"data":{"values":[{"a":1}]},"mark":"bar","encoding":{"x":{"field":"a","type":"zzz"}}}');
   assert.ok(!compile.ok && /^Vega-Lite: Invalid field type/.test(compile.error), JSON.stringify(compile));
+});
+
+test("Vega runs in a worker with a timeout: an overrun is stopped and reported, and the next chart still renders", async () => {
+  const r = await renderVega(spec("bar"), { timeoutMs: 1 }); // a compile plus a layout cannot finish in 1 ms
+  assert.ok(!r.ok && /Vega-Lite took longer than 0\.001 s/.test(r.error), JSON.stringify(r).slice(0, 200));
+  assert.ok((await renderVega(spec("line"))).ok);
 });
 
 test("an expression cannot reach the host: Vega runs with the AST interpreter", async () => {
