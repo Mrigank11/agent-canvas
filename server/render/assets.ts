@@ -16,6 +16,8 @@ import { tokensFixed } from "../../shared/ui-spec.ts";
 import type { AssetFormat } from "../../shared/asset-format.ts";
 
 export const HASH_RE = /^[0-9a-f]{32}$/;
+/** Part of every diagram and chart hash: bump when the house style changes, so saved canvases re-render instead of showing the old look. */
+const DOT_VERSION = "dot2", VEGA_VERSION = "vega2";
 const hashOf = (...parts: (string | Buffer)[]) => { const h = createHash("sha256"); for (const p of parts) { h.update(p); h.update("\0"); } return h.digest("hex").slice(0, 32); };
 
 /** What a renderer makes from one block's input. `w`/`h` are the natural size, for layout before the bytes arrive. */
@@ -129,8 +131,8 @@ export class Assets {
       raster: (hash, theme, width) => this.svg.raster(hash, theme, width),
     };
   }
-  readonly dot = this.generated("dot", "dot2");
-  readonly vega = this.generated("vega-lite", "vega2");
+  readonly dot = this.generated("dot", DOT_VERSION);
+  readonly vega = this.generated("vega-lite", VEGA_VERSION);
 
   readonly image: RichRenderer<string> = {
     name: "image",
@@ -197,8 +199,8 @@ export class Assets {
     const errors: string[] = [], notes: string[] = [];
     const jobs: { n: Node; hash: string; run: () => ReturnType<typeof renderDot> }[] = [];
     walk(root, (n) => {
-      if (n.tag === "Diagram") jobs.push({ n, hash: hashOf("dot1", n.text), run: () => renderDot(n.text) });
-      else if (n.tag === "Chart" && n.attrs.lang === "vega-lite") jobs.push({ n, hash: hashOf("vega1", n.text), run: () => renderVega(n.text) });
+      if (n.tag === "Diagram") jobs.push({ n, hash: hashOf(DOT_VERSION, n.text), run: () => renderDot(n.text) });
+      else if (n.tag === "Chart" && n.attrs.lang === "vega-lite") jobs.push({ n, hash: hashOf(VEGA_VERSION, n.text), run: () => renderVega(n.text) });
     });
     for (const j of jobs) {
       if (this.stored(j.hash)) continue;
