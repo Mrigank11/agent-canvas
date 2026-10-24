@@ -33,6 +33,7 @@ type TagSpec = {
 export const BLOCKS = ["Bluf", "Steps", "Progress", "Metric", "Decision", "Ask", "Diff", "Chart", "Table", "Link", "Note", "Code"] as const;
 export const TONES = ["info", "warn", "error", "success"] as const;
 export const STEP_STATES = ["pending", "active", "done", "failed", "skipped"] as const;
+export type StepState = (typeof STEP_STATES)[number];
 export const CANVAS_STATUS = ["working", "done", "blocked", "waiting"] as const;
 
 export const VOCABULARY: Record<string, TagSpec> = {

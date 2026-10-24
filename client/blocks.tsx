@@ -1,157 +1,187 @@
+// Native block renderer: composes the shared primitives from the shared plan. No colours or rules live here.
 import { useRpc } from "@getpaseo/plugin/client";
 import { useState } from "react";
-import { Text, View } from "react-native";
-import { chartPoints, type Node } from "../shared/canvas";
+import { Pressable, Text, View } from "react-native";
+import { planBlocks, type BlockPlan } from "../shared/plan";
 import { answerRpc } from "../shared/contract";
-import { Button, openUrl, type Theme } from "./common";
+import { Bar, Button, Chip, DeltaChip, GlyphCircle, Meta, Region, Section, SectionLabel, Sheet, StatusDot, StepRow, Txt, Well } from "./ui/atoms";
+import { ink, typeStyle, useT } from "./ui/tokens";
+import { openUrl } from "./common";
+import type { Node } from "../shared/canvas";
 
-const STEP_ICON: Record<string, string> = { done: "✓", active: "●", pending: "○", failed: "✕", skipped: "–" };
-
-function Card({ theme, children, accent }: { theme: Theme; children: React.ReactNode; accent?: boolean }) {
-  return <View style={{ gap: 6, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: accent ? theme.colors.accent : theme.colors.border, backgroundColor: theme.colors.surface1 }}>{children}</View>;
-}
-function Label({ theme, children }: { theme: Theme; children: string }) {
-  return <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11, fontWeight: "700", letterSpacing: 0.6 }}>{children.toUpperCase()}</Text>;
-}
-function toneColor(theme: Theme, tone: unknown) {
-  return tone === "warn" ? theme.colors.statusWarning : tone === "error" ? theme.colors.statusDanger : tone === "success" ? theme.colors.statusSuccess : theme.colors.accent;
-}
-
-function AskBlock({ n, agentId, theme }: { n: Node; agentId: string; theme: Theme }) {
+/**
+ * The open question. `panel` is the one tinted region of a surface; `flat` sits inside a card that is already the
+ * container (the timeline), so it only gets a hairline above it. Answered, it collapses to the chosen option.
+ */
+export function AskPanel({ plan, agentId, variant = "panel" }: { plan: Extract<BlockPlan, { kind: "ask" }>; agentId: string; variant?: "panel" | "flat" }) {
+  const t = useT();
   const answer = useRpc(answerRpc);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const answered = n.attrs.answer ? String(n.attrs.answer) : null;
   const pick = async (value: string) => {
     setBusy(true);
     setErr(null);
     try {
-      const r = await answer({ agentId, askId: n.id, value });
+      const r = await answer({ agentId, askId: plan.id, value });
       if (!r.ok) setErr(r.error ?? "failed");
     } catch (e) { setErr((e as Error).message); }
     setBusy(false);
   };
-  return (
-    <Card theme={theme} accent={answered === null}>
-      <Label theme={theme}>{answered === null ? "Question" : "Answered"}</Label>
-      <Text style={{ color: theme.colors.foreground, fontSize: 16 }}>{String(n.attrs.question)}</Text>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-        {n.children.map((o) => {
-          const v = String(o.attrs.value);
-          if (answered !== null) {
-            const picked = answered === v;
-            return (
-              <View key={o.id} style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 99, borderWidth: 1, borderColor: picked ? theme.colors.statusSuccess : theme.colors.border, backgroundColor: picked ? theme.colors.statusSuccess : "transparent", opacity: picked ? 1 : 0.5 }}>
-                <Text style={{ color: picked ? theme.colors.surface0 : theme.colors.foregroundMuted }}>{o.text || v}</Text>
-              </View>
-            );
-          }
-          return <Button key={o.id} theme={theme} label={o.text || v} disabled={busy} onPress={() => void pick(v)} />;
-        })}
+  if (plan.answered !== null) {
+    return (
+      <Section>
+        <SectionLabel text="Answered" />
+        <Txt c="muted">{plan.question}</Txt>
+        <Chip tone="ok" glyph="✓" text={plan.answered} />
+      </Section>
+    );
+  }
+  const body = (
+    <View style={{ gap: 10 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <StatusDot tone="hot" size={6} halo={false} />
+        <Txt role="label" c="hot">Question</Txt>
       </View>
-      {err ? <Text style={{ color: theme.colors.statusDanger, fontSize: 13 }}>{err}</Text> : null}
-    </Card>
+      <Txt role="ledeStrong">{plan.question}</Txt>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        {plan.options.map((o) => <Button key={o.value} label={o.label} disabled={busy} onPress={() => void pick(o.value)} />)}
+      </View>
+      {err ? <Txt role="meta" c="err">{err}</Txt> : null}
+    </View>
+  );
+  if (variant === "flat") return <View style={{ gap: 10, paddingTop: 12, borderTopWidth: 1, borderTopColor: t.line }}>{body}</View>;
+  return <View style={{ backgroundColor: t.askTint, borderRadius: 10, padding: 14 }}>{body}</View>;
+}
+
+function Metrics({ plan }: { plan: Extract<BlockPlan, { kind: "metrics" }> }) {
+  return (
+    <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 28, rowGap: 12 }}>
+      {plan.items.map((m) => (
+        <View key={m.id}>
+          <Meta>{m.label}</Meta>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Txt role="screenTitle" c={m.valueSignal ?? "fg"} weight="600">{m.head}</Txt>
+            {m.delta ? <DeltaChip delta={m.delta} /> : null}
+          </View>
+        </View>
+      ))}
+    </View>
   );
 }
 
-export function Block({ n, agentId, theme }: { n: Node; agentId: string; theme: Theme }) {
-  const fg = { color: theme.colors.foreground } as const;
-  const muted = { color: theme.colors.foregroundMuted } as const;
-  switch (n.tag) {
-    case "Bluf": return <Text style={{ ...fg, fontSize: 17, lineHeight: 24 }}>{n.text}</Text>;
-    case "Steps":
-      return (
-        <Card theme={theme}>
-          <Label theme={theme}>{String(n.attrs.title ?? "Steps")}</Label>
-          {n.children.map((s) => {
-            const st = String(s.attrs.state);
-            const color = st === "done" ? theme.colors.statusSuccess : st === "active" ? theme.colors.accent : st === "failed" ? theme.colors.statusDanger : theme.colors.foregroundMuted;
-            return (
-              <View key={s.id} style={{ flexDirection: "row", gap: 10 }}>
-                <Text style={{ color, width: 18, textAlign: "center", fontSize: 15 }}>{STEP_ICON[st]}</Text>
-                <Text style={{ flex: 1, fontSize: 15, color: st === "pending" || st === "skipped" ? theme.colors.foregroundMuted : theme.colors.foreground, fontWeight: st === "active" ? "700" : "400" }}>{s.text}</Text>
-              </View>
-            );
-          })}
-        </Card>
-      );
-    case "Progress": {
-      const max = Number(n.attrs.max ?? 100) || 100;
-      const pct = Math.max(0, Math.min(100, (Number(n.attrs.value) / max) * 100));
-      return (
-        <View style={{ gap: 4 }}>
+function Table({ plan }: { plan: Extract<BlockPlan, { kind: "table" }> }) {
+  const t = useT();
+  const cell = (num: boolean) => ({ flex: 1, textAlign: num ? ("right" as const) : ("left" as const) });
+  return (
+    <View>
+      <View style={{ flexDirection: "row", backgroundColor: t.well, borderRadius: 6, paddingVertical: 5, paddingHorizontal: 8 }}>
+        {plan.cols.map((c, i) => <Text key={i} style={[typeStyle("label"), cell(plan.numeric[i]), { color: t.muted }]}>{c}</Text>)}
+      </View>
+      {plan.rows.map((r, ri) => (
+        <View key={ri} style={{ flexDirection: "row", paddingVertical: 7, paddingHorizontal: 8, borderBottomWidth: ri === plan.rows.length - 1 ? 0 : 1, borderBottomColor: t.line }}>
+          {r.map((c, ci) => <Text key={ci} style={[typeStyle("body", c.best ? "500" : "400"), cell(plan.numeric[ci]), { color: c.best ? ink(t, "ok") : t.fg }]}>{c.text}</Text>)}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function Diff({ plan }: { plan: Extract<BlockPlan, { kind: "diff" }> }) {
+  const t = useT();
+  const row = (k: string) => (k === "add" ? { c: ink(t, "ok"), bg: t.sig("ok").tint } : k === "del" ? { c: ink(t, "err"), bg: t.sig("err").tint } : k === "hunk" ? { c: ink(t, "run"), bg: "transparent" } : { c: t.muted, bg: "transparent" });
+  return (
+    <Section>
+      {plan.file ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Txt role="mono" c="fg">{plan.file}</Txt>
+          <Text style={[typeStyle("mono", "500")]}>
+            <Text style={{ color: ink(t, "ok") }}>+{plan.add}</Text>
+            <Text style={{ color: t.muted }}> </Text>
+            <Text style={{ color: ink(t, "err") }}>−{plan.del}</Text>
+          </Text>
+        </View>
+      ) : null}
+      <Well>
+        {plan.lines.map((l, i) => {
+          const r = row(l.kind);
+          return <Text key={i} style={[typeStyle("mono"), { color: r.c, backgroundColor: r.bg, paddingHorizontal: 12, opacity: l.kind === "hunk" ? 0.8 : 1 }]}>{l.text || " "}</Text>;
+        })}
+      </Well>
+    </Section>
+  );
+}
+
+function Chart({ plan }: { plan: Extract<BlockPlan, { kind: "chart" }> }) {
+  // No SVG in the plugin UI kit: both kinds draw as labelled bars natively (the browser view draws the real line).
+  const max = Math.max(...plan.points.map((p) => p.value), 1);
+  return (
+    <Section>
+      {plan.label ? <SectionLabel text={plan.label} /> : null}
+      {plan.points.map((p, i) => (
+        <View key={i} style={{ gap: 4 }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-            <Text style={{ ...muted, fontSize: 13 }}>{String(n.attrs.label ?? "")}</Text>
-            <Text style={{ ...fg, fontSize: 13, fontWeight: "700" }}>{Math.round(pct)}%</Text>
+            <Meta>{p.label}</Meta>
+            <Txt role="label" c="fg">{p.value}</Txt>
           </View>
-          <View style={{ height: 8, borderRadius: 4, backgroundColor: theme.colors.border, overflow: "hidden" }}>
-            <View style={{ width: `${pct}%`, height: 8, backgroundColor: theme.colors.accent }} />
+          <Bar pct={(p.value / max) * 100} tone="run" height={6} />
+        </View>
+      ))}
+    </Section>
+  );
+}
+
+export function BlockView({ plan, agentId, askVariant, dense }: { plan: BlockPlan; agentId: string; askVariant?: "panel" | "flat"; /** steps without their tick strip (the popover shows it in its header) */ dense?: boolean }) {
+  const t = useT();
+  switch (plan.kind) {
+    case "bluf": return <Txt role="lede">{plan.text}</Txt>;
+    case "steps":
+      return (
+        <Section>
+          <SectionLabel text={plan.label} ticks={dense ? undefined : plan.ticks} count={dense ? undefined : plan.count} />
+          <View style={{ gap: 2 }}>{plan.rows.map((r) => <StepRow key={r.id} state={r.state} text={r.text} />)}</View>
+        </Section>
+      );
+    case "progress":
+      return (
+        <Section>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
+            <Meta>{plan.label}</Meta>
+            <Txt role="label" c={plan.signal} weight="600">{plan.text}</Txt>
           </View>
-        </View>
+          <Bar pct={plan.pct} tone={plan.signal} ticks />
+        </Section>
       );
-    }
-    case "Metric":
+    case "metrics": return <Metrics plan={plan} />;
+    case "decision":
       return (
-        <View style={{ alignSelf: "flex-start", paddingHorizontal: 14, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface1 }}>
-          <Text style={{ ...muted, fontSize: 12 }}>{String(n.attrs.label)}</Text>
-          <Text style={{ color: n.attrs.tone ? toneColor(theme, n.attrs.tone) : theme.colors.foreground, fontSize: 20, fontWeight: "700" }}>{String(n.attrs.value)}</Text>
-        </View>
+        <Section>
+          <SectionLabel text={plan.label} />
+          {plan.chosen ? <Chip tone="ok" glyph="✓" text={plan.chosen} /> : null}
+          {plan.reason ? <Txt c="muted">{plan.reason}</Txt> : null}
+        </Section>
       );
-    case "Decision":
+    case "ask": return <AskPanel plan={plan} agentId={agentId} variant={askVariant} />;
+    case "diff": return <Diff plan={plan} />;
+    case "code": return <Well>{plan.text.split("\n").map((l, i) => <Text key={i} style={[typeStyle("mono"), { color: t.fg, paddingHorizontal: 12 }]}>{l || " "}</Text>)}</Well>;
+    case "chart": return <Chart plan={plan} />;
+    case "table": return <Table plan={plan} />;
+    case "link":
       return (
-        <Card theme={theme}>
-          <Label theme={theme}>{`Decision · ${n.attrs.title}`}</Label>
-          {n.attrs.chosen ? <Text style={{ ...fg, fontWeight: "700" }}>→ {String(n.attrs.chosen)}</Text> : null}
-          <Text style={{ ...muted, fontSize: 14 }}>{n.text}</Text>
-        </Card>
+        <Pressable accessibilityRole="link" onPress={() => openUrl(plan.href)} style={{ alignSelf: "flex-start" }}>
+          <Txt c="run">{plan.text} ↗</Txt>
+        </Pressable>
       );
-    case "Ask": return <AskBlock n={n} agentId={agentId} theme={theme} />;
-    case "Diff":
+    case "note":
       return (
-        <Card theme={theme}>
-          {n.attrs.file ? <Label theme={theme}>{String(n.attrs.file)}</Label> : null}
-          {n.text.split("\n").map((l, i) => (
-            <Text key={i} style={{ fontFamily: "monospace", fontSize: 12, color: l.startsWith("+") ? theme.colors.statusSuccess : l.startsWith("-") ? theme.colors.statusDanger : theme.colors.foregroundMuted }}>{l || " "}</Text>
-          ))}
-        </Card>
+        <Region tone={plan.signal} style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
+          <GlyphCircle size={18} tone={plan.signal} glyph={plan.glyph} solid weight="700" />
+          <View style={{ flex: 1 }}><Txt>{plan.text}</Txt></View>
+        </Region>
       );
-    case "Chart": {
-      // No SVG in the plugin UI kit, so both chart kinds draw as labelled bars on native; the browser view draws a real line.
-      const pts = chartPoints(String(n.attrs.data)) ?? [];
-      const max = Math.max(...pts.map((p) => p.value), 1);
-      return (
-        <Card theme={theme}>
-          {n.attrs.title ? <Label theme={theme}>{String(n.attrs.title)}</Label> : null}
-          {pts.map((p, i) => (
-            <View key={i} style={{ gap: 2 }}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                <Text style={{ ...muted, fontSize: 12 }}>{p.label}</Text>
-                <Text style={{ ...fg, fontSize: 12 }}>{p.value}</Text>
-              </View>
-              <View style={{ height: 6, borderRadius: 3, backgroundColor: theme.colors.border }}>
-                <View style={{ width: `${(p.value / max) * 100}%`, height: 6, borderRadius: 3, backgroundColor: theme.colors.accent }} />
-              </View>
-            </View>
-          ))}
-        </Card>
-      );
-    }
-    case "Table": {
-      const cols = String(n.attrs.cols).split("|").map((c) => c.trim());
-      return (
-        <Card theme={theme}>
-          <View style={{ flexDirection: "row" }}>{cols.map((c, i) => <Text key={i} style={{ flex: 1, ...muted, fontSize: 12, fontWeight: "700" }}>{c}</Text>)}</View>
-          {n.children.map((r) => (
-            <View key={r.id} style={{ flexDirection: "row" }}>{r.text.split("|").map((c, i) => <Text key={i} style={{ flex: 1, ...fg, fontSize: 14 }}>{c.trim()}</Text>)}</View>
-          ))}
-        </Card>
-      );
-    }
-    case "Link": return <Text accessibilityRole="link" onPress={() => openUrl(String(n.attrs.href))} style={{ color: theme.colors.accent, fontSize: 15 }}>{n.text || String(n.attrs.href)}</Text>;
-    case "Note":
-      return <Text style={{ ...fg, fontSize: 14, padding: 10, borderLeftWidth: 3, borderLeftColor: toneColor(theme, n.attrs.tone), backgroundColor: theme.colors.surface1, borderRadius: 6 }}>{n.text}</Text>;
-    case "Code":
-      return <Text style={{ fontFamily: "monospace", fontSize: 12, color: theme.colors.foreground, padding: 10, backgroundColor: theme.colors.surface1, borderRadius: 8 }}>{n.text}</Text>;
-    default: return null;
   }
+}
+
+/** The blocks of a canvas as one sheet. */
+export function Blocks({ root, agentId, only, askVariant, dense, gap }: { root: Node; agentId: string; only?: ReadonlySet<string>; askVariant?: "panel" | "flat"; dense?: boolean; gap?: number }) {
+  return <Sheet gap={gap}>{planBlocks(root, only).map((p) => <BlockView key={p.id} plan={p} agentId={agentId} askVariant={askVariant} dense={dense} />)}</Sheet>;
 }

@@ -15,9 +15,9 @@ export default function contribute(client: PluginClientContext) {
       icon: "LayoutDashboard",
       context: "workspace",
       locations: ["explorer", "workspace"],
-      Component: ({ workspaceId, theme, layout, navigation }) => (
+      Component: ({ workspaceId, theme, layout }) => (
         <CanvasProvider>
-          <SidePanelBody workspaceId={workspaceId} theme={theme} layout={layout} navigation={navigation} />
+          <SidePanelBody workspaceId={workspaceId} theme={theme} layout={layout} />
         </CanvasProvider>
       ),
     }),

@@ -31,7 +31,7 @@ export function startHttp(hub: Hub, port: number, host: string, log: (m: string)
         let g = m(/^\/a\/([\w-]+)$/);
         if (g) {
           const v = hub.view(g[1]);
-          return v ? send(res, 200, "text/html", page(v.title, renderCanvas(v, now()), `/frag/${g[1]}`, ` <b>/</b> <span>${esc(v.title)}</span>`)) : send(res, 404, "text/plain", "no such agent");
+          return v ? send(res, 200, "text/html", page(v.title, renderCanvas(v, now()), `/frag/${g[1]}`, ` <span class="crumb">/</span> <span class="crumb">${esc(v.title)}</span>`)) : send(res, 404, "text/plain", "no such agent");
         }
         g = m(/^\/frag\/([\w-]+)$/);
         if (g) { const v = hub.view(g[1]); return v ? send(res, 200, "text/html", renderCanvas(v, now())) : send(res, 404, "text/plain", ""); }

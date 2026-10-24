@@ -1,7 +1,6 @@
 import { openExternalUrl, useRpc, type PluginHostProps } from "@getpaseo/plugin/client";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
-import { Pressable, Text } from "react-native";
 import { getRpc, listRpc, type CanvasView } from "../shared/contract";
 
 // Own client so the plugin never depends on the host mounting a QueryClientProvider.
@@ -37,26 +36,4 @@ export function useNow(ms = 1000): number {
 
 export function openUrl(url: string) {
   openExternalUrl(url).catch(() => {});
-}
-
-export function Button({ label, onPress, theme, disabled, quiet }: { label: string; onPress: () => void; theme: Theme; disabled?: boolean; quiet?: boolean }) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      disabled={disabled}
-      onPress={onPress}
-      style={{
-        alignSelf: "flex-start",
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 99,
-        borderWidth: 1,
-        borderColor: disabled ? theme.colors.border : theme.colors.accent,
-        backgroundColor: quiet || disabled ? "transparent" : theme.colors.accent,
-      }}
-    >
-      <Text style={{ color: disabled ? theme.colors.foregroundMuted : quiet ? theme.colors.accent : theme.colors.accentForeground, fontWeight: "600", fontSize: 14 }}>{label}</Text>
-    </Pressable>
-  );
 }

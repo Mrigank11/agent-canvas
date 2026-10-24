@@ -2,66 +2,84 @@ import type { PluginScreenProps, PluginSidebarItemProps } from "@getpaseo/plugin
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useState } from "react";
-import { Pressable, Text, View } from "react-native";
-import { checkHonesty } from "../shared/honesty";
-import { CanvasBody, useLiveAgent } from "./canvas";
-import { useFocusedAgent } from "./store";
-import { Button, CanvasProvider, useNow, useView, useViews, type Theme } from "./common";
+import { Pressable, View } from "react-native";
 import type { CanvasView } from "../shared/contract";
+import { rowPlan, type RowPlan } from "../shared/plan";
+import { SPACE } from "../shared/ui-spec";
+import { CanvasBody, useLiveAgent } from "./canvas";
+import { CanvasProvider, openUrl, useNow, useViews } from "./common";
+import { Button, FlagLine, Meta, ProgressTicks, Segmented, StatusBadge, StatusDot, Txt } from "./ui/atoms";
+import { UiRoot, useT, type Theme } from "./ui/tokens";
+import { useFocusedAgent } from "./store";
 
 export const LIST_SCREEN = "canvases";
+type OpenAgent = (input: { agentId: string }) => void;
 
-function useVerdictFor(v: CanvasView, now: number) {
-  return checkHonesty(v.tree, { runState: v.runState, canvasUpdatedAt: v.updatedAt, toolCallsSinceUpdate: Math.max(0, v.callsNow - v.callsAtUpdate), now });
-}
-
-function Tile({ v, theme, onOpen }: { v: CanvasView; theme: Theme; onOpen: () => void }) {
-  const now = useNow(2000);
-  const verdict = useVerdictFor(v, now);
-  const bluf = v.tree.children.find((c) => c.tag === "Bluf");
-  const hot = verdict.label === "Needs you";
-  const warn = verdict.label === "Disputed" || verdict.label === "Stale";
-  const color = verdict.label === "Error" ? theme.colors.statusDanger : warn ? theme.colors.statusWarning : hot ? theme.colors.accent : theme.colors.foregroundMuted;
+/** One agent in the list. The row that needs you is the single filled row; nothing else has a frame. */
+function CanvasRow({ plan, onOpen, last }: { plan: RowPlan; onOpen: () => void; last: boolean }) {
+  const t = useT();
+  const hot = plan.needsYou;
   return (
-    <Pressable accessibilityRole="button" onPress={onOpen} style={{ gap: 4, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: hot || warn || verdict.label === "Error" ? color : theme.colors.border, backgroundColor: theme.colors.surface1, opacity: verdict.dim ? 0.55 : 1 }}>
-      <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 8 }}>
-        <Text style={{ color: theme.colors.foreground, fontSize: 16, fontWeight: "700", flexShrink: 1 }}>{v.title}</Text>
-        <Text style={{ color, fontSize: 12, fontWeight: "700" }}>{verdict.label}</Text>
+    <Pressable accessibilityRole="button" onPress={onOpen} style={(s) => ({ gap: 4, paddingVertical: 14, paddingHorizontal: 12, marginHorizontal: -12, borderRadius: 8, backgroundColor: hot ? t.sig("hot").tint : (s as { hovered?: boolean }).hovered ? t.raised : "transparent", borderBottomWidth: last || hot ? 0 : 1, borderBottomColor: t.line, opacity: plan.dim ? 0.55 : 1 })}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <StatusDot tone={plan.signal} />
+        <View style={{ flexShrink: 1 }}><Txt weight="600" numberOfLines={1}>{plan.title}</Txt></View>
+        {plan.ticks.length ? <ProgressTicks states={plan.ticks} max={120} /> : null}
+        <View style={{ marginLeft: "auto" }}><StatusBadge tone={plan.signal} label={plan.label} glyph={plan.signal === "ok" ? "check" : "dot"} /></View>
       </View>
-      {bluf ? <Text style={{ color: theme.colors.foreground, fontSize: 14 }} numberOfLines={2}>{bluf.text}</Text> : null}
-      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>{v.auto ? "auto canvas" : "agent canvas"} · {v.runState}{v.currentTool ? ` · ${v.currentTool.slice(0, 40)}` : ""}</Text>
-      {verdict.flags.filter((f) => f.severity !== "info" || f.code === "needs-you").map((f) => <Text key={f.code} style={{ color, fontSize: 12 }}>{f.text}</Text>)}
+      {plan.bluf ? <View style={{ paddingLeft: 18 }}><Txt c={hot ? "fg" : "muted"} numberOfLines={1}>{plan.bluf}</Txt></View> : null}
+      <View style={{ paddingLeft: 18, gap: 4 }}>
+        <Meta>{plan.meta}</Meta>
+        {plan.flag ? <FlagLine flag={plan.flag} /> : null}
+      </View>
     </Pressable>
   );
 }
 
 function ListBody({ theme, layout, navigation }: PluginScreenProps) {
-  return <Inner theme={theme} compact={layout.compact} openAgent={navigation?.openAgent} />;
-}
-type OpenAgent = (input: { agentId: string }) => void;
-function Inner({ theme, compact, openAgent }: { theme: Theme; compact: boolean; openAgent?: OpenAgent }) {
   const { views, loading, unavailable } = useViews();
+  const now = useNow(2000);
   const [open, setOpen] = useState<string | null>(null);
   const sel = views.find((v) => v.agentId === open) ?? null;
-  const pad = compact ? 16 : 28;
-  if (sel) {
-    return (
-      <ScrollView style={{ flex: 1, backgroundColor: theme.colors.surface0 }} contentContainerStyle={{ padding: pad, gap: 14 }}>
-        <Button theme={theme} quiet label="← All canvases" onPress={() => setOpen(null)} />
-        <CanvasBody view={sel} theme={theme} withBrowserLink onOpenAgent={openAgent ? () => openAgent({ agentId: sel.agentId }) : undefined} />
-      </ScrollView>
-    );
-  }
-  const need = views.filter((v) => v.runState === "idle" && JSON.stringify(v.tree).includes('"tag":"Ask"') && !JSON.stringify(v.tree).includes('"answer"')).length;
+  const pad = layout.compact ? SPACE.panel : 28;
+  const plans = views.map((v) => rowPlan(v, now));
+  const need = plans.filter((p) => p.needsYou).length;
+  const openAgent: OpenAgent | undefined = navigation?.openAgent;
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: theme.colors.surface0 }} contentContainerStyle={{ padding: pad, gap: 12 }}>
-      <Text style={{ color: theme.colors.foreground, fontSize: 22, fontWeight: "700" }}>Canvases{need ? ` · ${need} need you` : ""}</Text>
-      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Every agent's live view of its work. Tap one to open it.</Text>
-      {unavailable ? <Text style={{ color: theme.colors.statusWarning }}>Unavailable right now. Retrying.</Text> : loading ? <Text style={{ color: theme.colors.foregroundMuted }}>Loading…</Text> : null}
-      {views.map((v) => <Tile key={v.agentId} v={v} theme={theme} onOpen={() => setOpen(v.agentId)} />)}
-    </ScrollView>
+    <UiRoot theme={theme}>
+      <ScrollView style={{ flex: 1, backgroundColor: theme.colors.surface0 }} contentContainerStyle={{ padding: pad, gap: SPACE.block, maxWidth: 720, width: "100%", alignSelf: "center" }}>
+        {sel ? (
+          <>
+            <Button variant="ghost" label="← All canvases" onPress={() => setOpen(null)} />
+            <CanvasBody
+              view={sel}
+              theme={theme}
+              footer={
+                <View style={{ flexDirection: "row", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  {openAgent ? <Button variant="primary" label="Open agent" onPress={() => openAgent({ agentId: sel.agentId })} /> : null}
+                  <Button variant="ghost" label="Open in browser ↗" onPress={() => openUrl(sel.url)} />
+                </View>
+              }
+            />
+          </>
+        ) : (
+          <>
+            <View style={{ gap: 4 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <Txt role="screenTitle">Canvases</Txt>
+                {need > 0 ? <StatusBadge tone="hot" label={`${need} need you`} /> : null}
+              </View>
+              <Meta>Every agent's live view of its work. Tap one to open it.</Meta>
+            </View>
+            {unavailable ? <Txt c="warn">Unavailable right now. Retrying.</Txt> : loading ? <Txt c="muted">Loading…</Txt> : null}
+            <View>{plans.map((p, i) => <CanvasRow key={p.agentId} plan={p} last={i === plans.length - 1} onOpen={() => setOpen(p.agentId)} />)}</View>
+          </>
+        )}
+      </ScrollView>
+    </UiRoot>
   );
 }
+
 export function ListScreen(props: PluginScreenProps) {
   return <CanvasProvider><ListBody {...props} /></CanvasProvider>;
 }
@@ -71,8 +89,9 @@ export function ListItem({ openScreen, currentScreen }: PluginSidebarItemProps) 
 }
 
 /** The Explorer side panel: the canvas of the agent on screen in this workspace (reported by that agent's pill). */
-export function SidePanelBody({ workspaceId, theme, layout, navigation }: { workspaceId: string; theme: Theme; layout: { compact: boolean }; navigation?: { openAgent: (i: { agentId: string }) => void } }) {
+export function SidePanelBody({ workspaceId, theme, layout }: { workspaceId: string; theme: Theme; layout: { compact: boolean } }) {
   const { views, loading } = useViews();
+  const now = useNow(2000);
   const focused = useFocusedAgent(workspaceId);
   const mine = views.filter((v) => v.workspaceId === workspaceId);
   const [picked, setPicked] = useState<{ agentId: string; focusWas: string | null } | null>(null);
@@ -84,17 +103,15 @@ export function SidePanelBody({ workspaceId, theme, layout, navigation }: { work
   const view = mine.find((v) => v.agentId === shownId) ?? null;
   const live = useLiveAgent(shownId ?? "");
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: theme.colors.surface0 }} contentContainerStyle={{ padding: layout.compact ? 14 : 16, gap: 12 }}>
-      {mine.length > 1 ? (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-          {mine.map((v) => (
-            <Pressable key={v.agentId} accessibilityRole="button" onPress={() => setPicked({ agentId: v.agentId, focusWas: focused })} style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 99, borderWidth: 1, borderColor: v.agentId === shownId ? theme.colors.accent : theme.colors.border, backgroundColor: v.agentId === shownId ? theme.colors.accent : "transparent" }}>
-              <Text style={{ fontSize: 12, color: v.agentId === shownId ? theme.colors.accentForeground : theme.colors.foregroundMuted }} numberOfLines={1}>{v.title}</Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
-      {view ? <CanvasBody view={view} theme={theme} withBrowserLink live={shownId === view.agentId ? live : null} onOpenAgent={navigation ? () => navigation.openAgent({ agentId: view.agentId }) : undefined} /> : <Text style={{ color: theme.colors.foregroundMuted }}>{loading ? "Loading…" : "No agent in this workspace has a canvas yet."}</Text>}
-    </ScrollView>
+    <UiRoot theme={theme}>
+      <ScrollView style={{ flex: 1, backgroundColor: theme.colors.surface0 }} contentContainerStyle={{ padding: layout.compact ? SPACE.panel : SPACE.panel, gap: SPACE.block }}>
+        {mine.length > 1 ? <Segmented items={mine.map((v) => ({ id: v.agentId, label: v.title, tone: rowPlan(v, now).signal }))} value={shownId} onChange={(id) => setPicked({ agentId: id, focusWas: focused })} /> : null}
+        {view ? (
+          <CanvasBody view={view} theme={theme} live={shownId === view.agentId ? live : null} footer={<Button variant="ghost" label="Open in browser ↗" onPress={() => openUrl(view.url)} />} />
+        ) : (
+          <Txt c="muted">{loading ? "Loading…" : "No agent in this workspace has a canvas yet."}</Txt>
+        )}
+      </ScrollView>
+    </UiRoot>
   );
 }
