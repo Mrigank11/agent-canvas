@@ -129,8 +129,8 @@ export class Assets {
       raster: (hash, theme, width) => this.svg.raster(hash, theme, width),
     };
   }
-  readonly dot = this.generated("dot", "dot1");
-  readonly vega = this.generated("vega-lite", "vega1");
+  readonly dot = this.generated("dot", "dot2");
+  readonly vega = this.generated("vega-lite", "vega2");
 
   readonly image: RichRenderer<string> = {
     name: "image",
