@@ -95,6 +95,27 @@ export const GRID_GAP = 12;
 export const gridColumns = (cols: number, width: number): number => (width < GRID_COMPACT_BELOW ? 1 : Math.max(1, Math.min(3, Math.floor(cols))));
 export const RADIUS = { control: 8, chip: 6, region: 10, card: 12 } as const;
 
+// ---------- diagrams and charts ----------
+
+/**
+ * The house look of drawn diagrams (DOT, Vega-Lite) and the numbers the vocab doc gives for hand-written <Svg>: one unit is one
+ * px, 12 to 14 px text, rounded tinted cards, thin muted connectors. The values follow the Lavish diagram look (MIT, lavish-axi):
+ * ink at low opacity for fills and strokes so one artefact serves light and dark, tones as a tinted fill plus a hue stroke.
+ * Opacities are of the page ink (`fg`); at .06 it lands within a few levels of the `well` token in both modes.
+ */
+export const DIAGRAM_FONT = "ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
+export const DIAGRAM = {
+  fontSize: 13, edgeFontSize: 11, radius: 10,
+  /** Fill-opacity of a neutral card; stroke-opacity of its outline and of connectors; connector text. */
+  well: 0.06, line: 0.25, muted: 0.55, mutedText: 0.7,
+  stroke: 1.2, toneStroke: 1.6, emphasisStroke: 2.4,
+} as const;
+/** A drawing is shown at natural size (one unit is one px): it shrinks to fit its container only down to this fraction, then scrolls sideways. The browser's CSS and the native view read the same rule. */
+export const DRAWING_MIN_SCALE = 0.9;
+export const drawingWidth = (natural: number, avail: number): number => Math.max(Math.min(avail, natural), natural * DRAWING_MIN_SCALE);
+/** Series colours for charts: the signal hues first (so a chart's colours mean what the rest of the canvas's do), then three more. */
+export const CHART_PALETTE: readonly string[] = [SIGNAL.run.dot!.light, SIGNAL.ok.dot!.light, SIGNAL.warn.dot!.light, SIGNAL.err.dot!.light, "#a1a1aa", "#8b5cf6", "#14b8a6", "#ec4899"];
+
 // ---------- glyphs and signal mappings ----------
 
 /** One table for step glyphs; the native and browser renderers both read it. */

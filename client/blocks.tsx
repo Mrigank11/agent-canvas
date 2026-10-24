@@ -2,11 +2,11 @@
 import { useRpc } from "@getpaseo/plugin/client";
 import { createContext, useContext, useEffect, useState } from "react";
 import * as RN from "react-native";
-import { Pressable, Text, View, useWindowDimensions } from "react-native";
+import { Pressable, ScrollView, Text, View, useWindowDimensions } from "react-native";
 import { planBlocks, type BlockPlan } from "../shared/plan";
 import { answerRpc, assetRpc } from "../shared/contract";
 import { assetFormat, assetKey, type AssetFormat } from "../shared/asset-format";
-import { GRID_GAP, SPACE, gridColumns } from "../shared/ui-spec";
+import { GRID_GAP, SPACE, drawingWidth, gridColumns } from "../shared/ui-spec";
 import { Bar, Button, Chip, DeltaChip, GlyphCircle, Hairline, Meta, Region, Section, SectionLabel, Sheet, StatusDot, StepRow, Txt, Well } from "./ui/atoms";
 import { ink, typeStyle, useT } from "./ui/tokens";
 import { openUrl } from "./common";
@@ -126,6 +126,7 @@ function AssetImage({ hash, w, h, alt, label, vector = false }: { hash: string |
   const HostImage = (RN as { Image?: typeof RN.Image }).Image;
   const format = assetFormat((RN as { Platform?: { OS?: string } }).Platform?.OS ?? "native", vector);
   const [res, setRes] = useState<Asset | null | undefined>(undefined);
+  const [avail, setAvail] = useState(0);
   useEffect(() => {
     let live = true;
     setRes(undefined);
@@ -140,9 +141,21 @@ function AssetImage({ hash, w, h, alt, label, vector = false }: { hash: string |
       </View>
     );
   }
+  const img = res ? <HostImage accessibilityLabel={alt || label} source={{ uri: `data:${res.mime};base64,${res.base64}` }} resizeMode="contain" style={{ width: "100%", height: "100%" }} /> : null;
+  // A drawing keeps its natural size (one unit is one px) so its text stays readable: it shrinks to the container only down to
+  // DRAWING_MIN_SCALE and then scrolls sideways. A picture from a file fills the width as before.
+  if (vector && w && h) {
+    const shown = avail > 0 ? drawingWidth(w, avail) : Math.min(w, Math.max(0, width - 2 * SPACE.panel));
+    const box = <View style={{ width: shown, aspectRatio: w / h, borderRadius: 8, overflow: "hidden", backgroundColor: res ? "transparent" : t.well }}>{img}</View>;
+    return (
+      <View onLayout={(e) => setAvail(Math.floor(e.nativeEvent.layout.width))} style={{ width: "100%" }}>
+        {avail > 0 && shown > avail + 1 ? <ScrollView horizontal showsHorizontalScrollIndicator={false}>{box}</ScrollView> : box}
+      </View>
+    );
+  }
   return (
     <View style={{ width: "100%", aspectRatio: w && h ? w / h : 16 / 9, borderRadius: 8, overflow: "hidden", backgroundColor: res ? "transparent" : t.well }}>
-      {res ? <HostImage accessibilityLabel={alt || label} source={{ uri: `data:${res.mime};base64,${res.base64}` }} resizeMode="contain" style={{ width: "100%", height: "100%" }} /> : null}
+      {img}
     </View>
   );
 }

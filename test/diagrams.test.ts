@@ -194,7 +194,7 @@ test("canvas_set lays out diagrams and charts; browser and native read the same 
   for (const p of plans) assert.ok(p.kind === "svg" && p.hash && p.w > 0 && p.h > 0);
   // browser: inline svg for every one; native: a PNG per theme, from the same hash
   const html = renderCanvas(v, 5000, { svg: (x) => h.assets.inlineSvg(x) });
-  assert.equal((html.match(/class="svgwrap"/g) ?? []).length, 3);
+  assert.equal((html.match(/class="svgwrap" style="--w:\d+px"/g) ?? []).length, 3);
   assert.ok(html.includes('aria-label="the pipeline"') && html.includes(">Build</text>"));
   for (const p of plans) {
     if (p.kind !== "svg" || !p.hash) continue;
@@ -247,4 +247,102 @@ test("a patch is validated against the canvas it will join: ids stay stable thro
   const tree = parse(BODY);
   const r = patchCanvas(tree, [{ id: "old", text: spec("line") }]);
   assert.ok(r.ok, r.ok ? "" : r.errors.map((e) => e.message).join());
+});
+
+// ---------- house style ----------
+
+import { DIAGRAM, DIAGRAM_FONT, CHART_PALETTE, DRAWING_MIN_SCALE, SIGNAL, drawingWidth, tokensFixed } from "../shared/ui-spec.ts";
+import { INK, LINE, MUTED, MUTED_TEXT, PAPER, WELL } from "../shared/dot.ts";
+import { VOCAB_DOC } from "../server/vocab-doc.ts";
+import { readFileSync } from "node:fs";
+const src = (rel: string) => readFileSync(join(import.meta.dirname, rel), "utf8");
+
+test("DOT house style: soft-filled rounded cards, muted edges, page font, no stand-in paint left over", async () => {
+  const r = await renderDot("digraph { a -> b [label=go] }");
+  assert.ok(r.ok, r.ok ? "" : r.error);
+  if (!r.ok) return;
+  for (const hex of [INK, PAPER, WELL, LINE, MUTED, MUTED_TEXT]) assert.ok(!r.svg.includes(hex), `${hex} was swapped`);
+  assert.ok(r.svg.includes(`fill="currentColor" fill-opacity="${DIAGRAM.well}"`), "card fill is ink at the well opacity");
+  assert.ok(r.svg.includes(`stroke-opacity="${DIAGRAM.line}"`) && r.svg.includes(`stroke-opacity="${DIAGRAM.muted}"`), "outline and connector are ink at low opacity");
+  assert.ok(r.svg.includes(`fill="currentColor" fill-opacity="${DIAGRAM.muted}"`), "the arrowhead is muted like its edge");
+  assert.ok(r.svg.includes(`fill-opacity="${DIAGRAM.mutedText}"`), "edge labels are muted text");
+  assert.ok(r.svg.includes('stroke-linecap="round"'));
+  assert.ok(r.svg.includes(`font-family="${DIAGRAM_FONT}"`) && !r.svg.includes("Liberation"));
+  assert.ok(r.svg.includes(`font-size="${DIAGRAM.fontSize}.00"`), "natural size: 13 units is 13 px");
+});
+
+test("tones are tinted cards, emphasis is the heavier stroke, and neither overrides what the agent set", () => {
+  const dot = (src: string) => { const r = prepareDot(src); assert.ok(r.ok); return r.ok ? r.dot : ""; };
+  const ok = SIGNAL.ok.dot!.light, run = SIGNAL.run.dot!.light;
+  const tone = dot('digraph { a [color=ok] }');
+  assert.ok(tone.includes(`color="${ok}" fillcolor="${ok}${SIGNAL.ok.tintAlpha!.light}" penwidth=${DIAGRAM.toneStroke}`), tone);
+  const own = dot('digraph { a [color=ok fillcolor=warn penwidth=3] }');
+  assert.ok(own.includes(`fillcolor="${SIGNAL.warn.dot!.light}${SIGNAL.warn.tintAlpha!.light}"`) && !own.includes("penwidth=1.6") && !own.includes(`fillcolor="${ok}`), own);
+  const edge = dot('digraph { a -> b [color=err] }');
+  assert.ok(edge.includes(`color="${SIGNAL.err.dot!.light}"`) && !/b \[[^\]]*fillcolor/.test(edge), "an edge keeps the hue only: its arrowhead would take the fill");
+  assert.ok(!dot("digraph { edge [color=warn]; a -> b }").match(/edge \[[^\]]*fillcolor/), "edge defaults too");
+  const emph = dot('digraph { a [emphasis=true] }');
+  assert.ok(emph.includes(`penwidth=${DIAGRAM.emphasisStroke}`) && emph.includes(`color="${run}"`) && !emph.includes("emphasis"), emph);
+  const both = dot('digraph { a [color=warn emphasis=true] }');
+  assert.ok(both.includes(`penwidth=${DIAGRAM.emphasisStroke}`) && !both.includes(`penwidth=${DIAGRAM.toneStroke}`) && !both.includes(run), both);
+  assert.ok(!dot('digraph { a [emphasis=false] }').includes("penwidth=2.4"));
+  assert.ok(dot('digraph { a [label="color=ok emphasis=true"] }').includes('"color=ok emphasis=true"'), "label text untouched");
+});
+
+test("a tone renders as a tinted fill plus a hue stroke; a two-line HTML label renders", async () => {
+  const r = await renderDot('digraph { a [color=warn emphasis=true label=<<b>Test</b><br/><font point-size="11" color="gray">2 flaky</font>>] }');
+  assert.ok(r.ok, r.ok ? "" : r.error);
+  if (!r.ok) return;
+  assert.match(r.svg, /fill="#b37824" fill-opacity="0\.1\d+" stroke="#b37824" stroke-width="2\.4"/);
+  assert.ok(r.svg.includes(">Test</text>") && r.svg.includes(">2 flaky</text>"));
+  assert.doesNotMatch(r.svg.replace(' xmlns="http://www.w3.org/2000/svg"', ""), SAFE_OUT);
+});
+
+test("the neutral card fill matches the well token in both modes, to within a few levels", () => {
+  for (const mode of ["light", "dark"] as const) {
+    const t = tokensFixed(mode);
+    const ch = (hex: string, i: number) => parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16);
+    for (let i = 0; i < 3; i++) {
+      const blended = ch(t.fg, i) * DIAGRAM.well + ch(t.bg, i) * (1 - DIAGRAM.well);
+      assert.ok(Math.abs(blended - ch(t.well, i)) <= 6, `${mode} channel ${i}: ${blended} vs ${ch(t.well, i)}`);
+    }
+  }
+});
+
+test("Vega-Lite theme: signal hues for series, the page font, no frame or ticks, dashed quiet grid, natural 11 px labels", async () => {
+  const r = await renderVega(JSON.stringify({ data: { values: rows }, mark: "bar", encoding: { x: { field: "a", type: "nominal" }, y: { field: "b", type: "quantitative" }, color: { field: "c", type: "nominal" } } }));
+  assert.ok(r.ok, r.ok ? "" : r.error);
+  if (!r.ok) return;
+  assert.ok(r.svg.includes(CHART_PALETTE[0]) && r.svg.includes(CHART_PALETTE[1]), "the first series are run and ok");
+  assert.ok(!r.svg.includes("#4c78a8"), "not Vega's stock blue");
+  assert.ok(r.svg.includes(`font-family="${DIAGRAM_FONT}"`) && r.svg.includes('font-size="11px"'));
+  assert.ok(r.svg.includes('stroke-dasharray="2,3"'), "dashed grid");
+  assert.ok(!/rotate\(270\)/.test(r.svg), "category labels stay horizontal");
+  const single = await renderVega(spec("bar"));
+  assert.ok(single.ok && single.svg.includes(SIGNAL.run.dot!.light), "a single series is the run hue");
+});
+
+test("drawings keep natural size: the browser sets --w and the CSS floors the scale; native uses the same rule", () => {
+  assert.equal(drawingWidth(640, 800), 640, "never upscaled");
+  assert.equal(drawingWidth(640, 600), 600, "shrinks a little to fit");
+  assert.equal(drawingWidth(640, 300), 640 * DRAWING_MIN_SCALE, "then stops shrinking (the container scrolls)");
+  const css = src("../server/ui-html.ts");
+  assert.ok(css.includes("overflow-x:auto") && css.includes("max(min(100%,var(--w,100%))"));
+  assert.ok(src("../client/blocks.tsx").includes("drawingWidth(w, avail)"));
+});
+
+test("the vocab doc and the skill send explanatory figures to hand-written Svg, and the skill's template is a valid, safe drawing", () => {
+  const skill = src("../skill/agent-canvas/SKILL.md");
+  for (const doc of [VOCAB_DOC, skill]) {
+    assert.match(doc, /figure that explains|figure that EXPLAINS/);
+    assert.match(doc, /Use DOT only when the graph is big/);
+    assert.match(doc, /emphasis=true/);
+  }
+  const tmpl = skill.match(/```\n(<Svg[\s\S]*?<\/Svg>)\n```/)?.[1];
+  assert.ok(tmpl, "template present");
+  const tree = parse(tmpl!);
+  const svg = planBlocks(tree)[0] as any;
+  assert.equal(svg.kind, "svg");
+  const a = new Assets(null);
+  return a.prepare(tree).then((p) => { assert.ok(p.ok, p.ok ? "" : p.errors.join()); });
 });

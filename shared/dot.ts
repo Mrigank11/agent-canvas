@@ -3,6 +3,8 @@
 // defaults are injected so a bare `digraph { a -> b }` already looks like the rest of the canvas. A tokenizer (not a
 // regex over the whole text) is used so a label that merely contains `URL=` is left alone.
 
+import { DIAGRAM, SIGNAL } from "./ui-spec.ts";
+
 export const DOT_LIMITS = { chars: 8_000, nodes: 300 };
 
 /** Graphviz attributes that name a URL, a file or a stylesheet. The WASM filesystem is empty, but nothing of them may reach the output either. */
@@ -12,11 +14,20 @@ const STRIPPED = new Set([
 ]);
 const COLOR_KEYS = new Set(["color", "fillcolor", "fontcolor", "bgcolor", "pencolor", "labelfontcolor", "headlabelfontcolor", "taillabelfontcolor"]);
 
-/** Tone names the agent may use as colours, mapped to hues that read on both light and dark (Paseo's own signal dots). */
-export const DOT_TONES: Record<string, string> = { ok: "#299f51", run: "#268ae0", warn: "#b37824", err: "#f12e2f", idle: "#a1a1aa" };
-/** The ink and surface stand-ins: Graphviz is told these hex values, and the renderer swaps them for currentColor / transparent in the SVG. */
+/** Tone names the agent may use as colours, mapped to the canvas's own signal hues (ui-spec), which read on both light and dark. */
+export const DOT_TONES: Record<string, string> = { ok: SIGNAL.ok.dot!.light, run: SIGNAL.run.dot!.light, warn: SIGNAL.warn.dot!.light, err: SIGNAL.err.dot!.light, idle: "#a1a1aa" };
+/** A tone's tint, as the alpha byte the canvas uses for its own tinted surfaces (idle has none: it borrows a mid value). */
+const toneTint = (name: string) => `${DOT_TONES[name]}${SIGNAL[name as "ok"]?.tintAlpha?.light ?? "1a"}`;
+/**
+ * Stand-ins for paint that depends on the page: Graphviz is given these hex values and the renderer swaps each for
+ * currentColor at an opacity (DIAGRAM in ui-spec), so one SVG serves light and dark. Distinct from any real colour an agent would pick.
+ */
 export const INK = "#010203";
 export const PAPER = "#010204";
+export const WELL = "#010205";
+export const LINE = "#010206";
+export const MUTED = "#010207";
+export const MUTED_TEXT = "#010208";
 
 type Tok = { t: "id" | "str" | "html" | "punct" | "ws"; v: string };
 
@@ -48,6 +59,33 @@ function tokenize(src: string): Tok[] | string {
 
 const unquote = (v: string) => (v.startsWith('"') ? v.slice(1, -1) : v);
 
+/** The `[ … ]` attribute list around token i, as [open, close] token indexes, or null when i is not inside one. */
+function listOf(toks: Tok[], i: number): [number, number] | null {
+  let a = i;
+  while (a >= 0 && !(toks[a].t === "punct" && (toks[a].v === "[" || toks[a].v === "]"))) a--;
+  if (a < 0 || toks[a].v !== "[") return null;
+  let b = i;
+  while (b < toks.length && !(toks[b].t === "punct" && toks[b].v === "]")) b++;
+  return b < toks.length ? [a, b] : null;
+}
+/** The (lower-cased) attribute names set in a list. */
+function keysIn(toks: Tok[], [a, b]: [number, number]): Set<string> {
+  const keys = new Set<string>();
+  for (let i = a + 1; i < b; i++) {
+    if (toks[i].t !== "id" && toks[i].t !== "str") continue;
+    let j = i + 1;
+    while (toks[j]?.t === "ws") j++;
+    if (toks[j]?.t === "punct" && toks[j].v === "=") keys.add(unquote(toks[i].v).toLowerCase());
+  }
+  return keys;
+}
+/** Whether the statement owning the list at [a, b] is an edge or an `edge [...]` default (an `->` or `--` before the bracket). */
+function isEdge(toks: Tok[], [a]: [number, number]): boolean {
+  let i = a - 1;
+  for (; i >= 0; i--) { const t = toks[i]; if (t.t === "punct" && (t.v === ";" || t.v === "{" || t.v === "}" || t.v === "]")) break; if (t.t === "id" && (t.v.includes("--") || (t.v.endsWith("-") && toks[i + 1]?.v === ">") || t.v.toLowerCase() === "edge")) return true; }
+  return false;
+}
+
 export type DotResult = { ok: true; dot: string; removed: string[] } | { ok: false; error: string };
 
 /** Strip, map, inject. `removed` names what was dropped, for the note back to the agent. */
@@ -78,9 +116,31 @@ export function prepareDot(body: string): DotResult {
             if (toks[i + 1]?.t === "punct" && (toks[i + 1].v === "," || toks[i + 1].v === ";")) i++;
             continue;
           }
+          if (key === "emphasis") {
+            // the house "one emphasised node": a heavier stroke, and the accent hue unless the element already has a colour
+            const on = !/^(false|no|0)$/i.test(unquote(val.v));
+            const list = listOf(toks, i);
+            if (on) {
+              out.push({ t: "id", v: "penwidth" }, { t: "punct", v: "=" }, { t: "id", v: String(DIAGRAM.emphasisStroke) });
+              if (list && !keysIn(toks, list).has("color")) out.push({ t: "ws", v: " " }, { t: "id", v: "color" }, { t: "punct", v: "=" }, { t: "str", v: `"${DOT_TONES.run}"` }, ...(isEdge(toks, list) ? [] : [{ t: "ws", v: " " } as Tok, { t: "id", v: "fillcolor" } as Tok, { t: "punct", v: "=" } as Tok, { t: "str", v: `"${toneTint("run")}"` } as Tok]));
+            }
+            i = k; continue;
+          }
           if (COLOR_KEYS.has(key) && val.t !== "html") {
-            const tone = DOT_TONES[unquote(val.v).toLowerCase()];
-            if (tone) { out.push(tk, { t: "punct", v: "=" }, { t: "str", v: `"${tone}"` }); i = k; continue; }
+            const name = unquote(val.v).toLowerCase();
+            const tone = DOT_TONES[name];
+            if (tone) {
+              if (key === "fillcolor") { out.push(tk, { t: "punct", v: "=" }, { t: "str", v: `"${toneTint(name)}"` }); i = k; continue; }
+              out.push(tk, { t: "punct", v: "=" }, { t: "str", v: `"${tone}"` });
+              // a tinted card: the hue as a thin stroke, its tint as the fill (nodes and clusters, not edges, whose arrowheads would take the fill)
+              const list = key === "color" ? listOf(toks, i) : null;
+              if (list) {
+                const keys = keysIn(toks, list);
+                if (!isEdge(toks, list) && !keys.has("fillcolor")) out.push({ t: "ws", v: " " }, { t: "id", v: "fillcolor" }, { t: "punct", v: "=" }, { t: "str", v: `"${toneTint(name)}"` });
+                if (!keys.has("penwidth") && !keys.has("emphasis")) out.push({ t: "ws", v: " " }, { t: "id", v: "penwidth" }, { t: "punct", v: "=" }, { t: "id", v: String(DIAGRAM.toneStroke) });
+              }
+              i = k; continue;
+            }
           }
         }
       }
@@ -95,5 +155,8 @@ export function prepareDot(body: string): DotResult {
   return { ok: true, dot: out.map((t) => t.v).join(""), removed: [...new Set(removed)] };
 }
 
-/** Theme defaults, first in the graph so the agent's own statements override them. */
-const DEFAULTS = `graph [bgcolor="${PAPER}" fontname="Helvetica" fontsize=11 fontcolor="${INK}" pad=0.15]; node [shape=box style="rounded" color="${INK}" fontcolor="${INK}" fontname="Helvetica" fontsize=11 margin="0.14,0.07" penwidth=1]; edge [color="${INK}" fontcolor="${INK}" fontname="Helvetica" fontsize=10 arrowsize=0.7];`;
+/**
+ * Theme defaults, first in the graph so the agent's own statements override them. One unit is one px (the page shows the
+ * drawing at natural size): 13 px labels on rounded cards with a soft fill, thin muted connectors, room between nodes.
+ */
+const DEFAULTS = `graph [bgcolor="${PAPER}" fontname="Helvetica" fontsize=${DIAGRAM.fontSize} fontcolor="${INK}" pad=0.3 nodesep=0.45 ranksep=0.6 splines=spline]; node [shape=box style="rounded,filled" fillcolor="${WELL}" color="${LINE}" fontcolor="${INK}" fontname="Helvetica" fontsize=${DIAGRAM.fontSize} margin="0.24,0.12" height=0.5 penwidth=${DIAGRAM.stroke}]; edge [color="${MUTED}" fontcolor="${MUTED_TEXT}" fontname="Helvetica" fontsize=${DIAGRAM.edgeFontSize} arrowsize=0.6 penwidth=${DIAGRAM.stroke}];`;

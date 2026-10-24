@@ -2,7 +2,7 @@
 // properties generated from shared/ui-spec.ts. No colour is written by hand in the component CSS: it only uses var(--…).
 import type { StepState } from "../shared/canvas.ts";
 import type { ActivityPlan, BackgroundPlan, FlagPlan, JobChipPlan, JobRowPlan, StatusPlan } from "../shared/plan.ts";
-import { ACTIVITY_ICONS, BASE, GRID_COMPACT_BELOW, GRID_GAP, SIGNAL, STEP_GLYPH, TONES, tokensFixed, type Delta, type Tone } from "../shared/ui-spec.ts";
+import { ACTIVITY_ICONS, BASE, DRAWING_MIN_SCALE, GRID_COMPACT_BELOW, GRID_GAP, SIGNAL, STEP_GLYPH, TONES, tokensFixed, type Delta, type Tone } from "../shared/ui-spec.ts";
 
 export const esc = (s: unknown) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
@@ -171,7 +171,8 @@ a{color:var(--run-t);text-decoration:none}a:hover{text-decoration:underline}
 .grid{display:grid;grid-template-columns:repeat(var(--cols,2),minmax(0,1fr));gap:${GRID_GAP}px;align-items:start}.cell{display:flex;flex-direction:column;gap:20px;min-width:0}
 @media (max-width:${GRID_COMPACT_BELOW - 1}px){.grid{grid-template-columns:minmax(0,1fr)}}
 .collapse{border:1px solid var(--line);border-radius:10px;padding:0 12px}.collapse summary{cursor:pointer;padding:9px 0;font-weight:500;list-style:none;display:flex;align-items:center;gap:8px}.collapse summary::-webkit-details-marker{display:none}.collapse summary::before{content:"›";display:inline-block;width:10px;color:var(--muted);transition:transform .12s}.collapse[open] summary::before{transform:rotate(90deg)}.collapse .cbody{display:flex;flex-direction:column;gap:20px;padding:4px 0 12px}
-.svgwrap{color:var(--fg);max-width:100%}.svgwrap svg{display:block;width:100%;max-width:640px;height:auto}.fig img{display:block;max-width:100%;height:auto;border-radius:8px}.figmiss{color:var(--muted)}
+/* Drawings at natural size (one viewBox unit is one px), so a 13 px label stays 13 px: shrink to fit only down to 90%, then scroll. */
+.svgwrap{color:var(--fg);max-width:100%;overflow-x:auto}.svgwrap svg{display:block;width:max(min(100%,var(--w,100%)),calc(var(--w,0px)*${DRAWING_MIN_SCALE}));max-width:none;height:auto}.fig img{display:block;max-width:100%;height:auto;border-radius:8px}.figmiss{color:var(--muted)}
 .md .mdbody{display:flex;flex-direction:column;gap:4px;min-width:0}.md .tbl .ctr{text-align:center}.md .tbl{display:block;overflow-x:auto}
 .note.run{background:var(--run-w)}.note.warn{background:var(--warn-w)}.note.err{background:var(--err-w)}.note.ok{background:var(--ok-w)}
 .gc.solid.run{background:var(--run);color:var(--bg)}.gc.solid.warn{background:var(--warn);color:var(--bg)}.gc.solid.err{background:var(--err);color:var(--bg)}.gc.solid.ok{background:var(--ok);color:var(--bg)}

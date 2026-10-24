@@ -176,7 +176,7 @@ test("the browser gets the rebuilt SVG inline and an <img> by hash for images; h
   assert.ok(a.check(tree, ws).ok);
   const view = viewOf(a.wire(tree, ws));
   const html = renderCanvas(view, 5000, { svg: (h) => a.inlineSvg(h) });
-  assert.match(html, /<div class="svgwrap" role="img" aria-label="hostile"><svg xmlns=/);
+  assert.match(html, /<div class="svgwrap" style="--w:\d+px" role="img" aria-label="hostile"><svg xmlns=/);
   assert.match(html, /safe &amp; sound/);
   assert.doesNotMatch(html.replace(/<script>[\s\S]*<\/script>/, ""), /<script|alert|foreignObject|evil|onload|onclick/); // (the page's own poller script is the only script)
   const hash = String(view.tree.children[1].attrs.hash);

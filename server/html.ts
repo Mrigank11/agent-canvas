@@ -68,7 +68,7 @@ export function renderPlan(p: BlockPlan, agentId: string, ctx: RenderCtx = {}): 
     case "markdown": return `<div class="md">${p.blocks.map(mdBlock).join("")}</div>`;
     case "svg": {
       const svg = p.hash ? ctx.svg?.(p.hash) : null;
-      return svg ? `<div class="svgwrap" role="img" aria-label="${esc(p.alt)}">${svg}</div>` : unavailable("Drawing", p.alt);
+      return svg ? `<div class="svgwrap" style="--w:${Math.round(p.w)}px" role="img" aria-label="${esc(p.alt)}">${svg}</div>` : unavailable("Drawing", p.alt);
     }
     case "image": return figure(p.hash, p.alt, p.w, p.h);
     case "grid": return `<div class="grid" style="--cols:${p.cols}">${p.children.map((c) => `<div class="cell">${renderPlan(c, agentId, ctx)}</div>`).join("")}</div>`;
