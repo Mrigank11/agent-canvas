@@ -9,18 +9,23 @@ Show your work as a live canvas the human watches instead of reading chat. Write
 
 <Canvas title="…" status="working|done|blocked|waiting">   root, exactly one
   <Bluf>one-line bottom line: what is true right now</Bluf>
+  <Metric label="Tests" value="12/14" tone="info|warn|error|success" />   numbers and pass/fail
+  <Decision title="…" chosen="…">why</Decision>   a choice you made
+  <Ask id="q1" question="…" blocking><Option value="a">Label A</Option><Option value="b">Label B</Option></Ask>   a question for the human
   <Steps title="…"><Step id="build" state="pending|active|done|failed|skipped">label</Step></Steps>
   <Progress value={40} max={100} label="…" />
-  <Metric label="Tests" value="12/14" tone="info|warn|error|success" />
-  <Decision title="…" chosen="…">why</Decision>
-  <Ask id="q1" question="…" blocking><Option value="a">Label A</Option><Option value="b">Label B</Option></Ask>
   <Markdown id="notes">standard GitHub Markdown: headings, lists, task lists, tables, fenced code, links, > [!WARNING] alerts</Markdown>
   <Svg id="arch" alt="what it shows"><svg viewBox="0 0 400 200">…</svg></Svg>   a drawing you write by hand: the right choice for any figure that explains (architecture sketch, sequence, a 3-8 step flow, before/after)
   <Image src="out/chart.png" alt="…" />   a PNG/JPEG/WebP/GIF file inside your workspace
-  <Diff file="a.ts">unified diff</Diff>   shows as a one-line summary (file, +/−) until tapped
   <Diagram id="flow" lang="dot" alt="…">digraph { a -> b }</Diagram>   Graphviz DOT, auto-laid-out: for a big graph or when layout is the hard part (dependency graphs, state machines)
   <Chart id="sales" lang="vega-lite" alt="…">{"data":{"values":[{"x":"a","y":1}]},"mark":"bar","encoding":{"x":{"field":"x","type":"nominal"},"y":{"field":"y","type":"quantitative"}}}</Chart>   Vega-Lite v5 JSON: bar, line, area, scatter, pie (arc), gantt (bar with x2)
+  <Grid cols={2}>blocks side by side (1 to 3; one column on a phone)</Grid>
+  <Collapse title="…">blocks folded away until tapped (closed; add open to start it open)</Collapse>
+  <Diff file="a.ts">unified diff</Diff>   code-review evidence only, inside a <Collapse>; shows as a one-line summary (file, +/−) until tapped
 </Canvas>
+
+Lead with what the human must know: <Bluf>, then <Metric> for numbers and pass/fail, <Decision> for a choice you made, <Ask> for what you need from them. Describe what changed in behaviour, not in code. File paths, function names, diffs, line numbers, hashes or command output only when the task is about the code itself (a code review, an API or design audit, a "which file / what changed exactly" question) or the human asked for them; even then put them inside a closed <Collapse> (a key <Diff> hunk, not whole files), never in the Bluf, Steps or Metrics:
+  <Collapse title="Code: the key change"><Diff file="src/app.ts">@@ …</Diff></Collapse>
 
 Prose, tables, code, links and callouts go in <Markdown>, written as you would anywhere else. Raw HTML in it shows as text and links must be http(s) or mailto. Markdown, Svg, Diagram, Chart and Diff bodies are written as-is: no escaping inside them.
 Pictures: <Svg> takes plain SVG with a viewBox (shapes, paths, text, gradients; script, style, links and external references are removed, nothing is fetched). <Image src> and Markdown ![alt](path) show a file from your workspace only (max 3 MB, 4096 px, not a URL, not outside the folder). Diagrams and charts are rendered when you call canvas_set/canvas_patch: a DOT syntax error or an invalid Vega-Lite spec comes back as the error and nothing changes. DOT: max 8,000 chars, 300 nodes, 3 s to lay out; URL/href/image/stylesheet attributes are removed; colour with color=ok|run|warn|err|idle. Vega-Lite: JSON spec, inline data.values only (max 5,000 rows, 16,000 chars), no data.url or href. Patch a diagram or chart with {id, text:"new body"}. Max 8 pictures, diagrams and charts per canvas.

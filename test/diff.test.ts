@@ -1,5 +1,6 @@
 // <Diff> is a closed fold with a one-line summary; <Collapse> is closed unless it says open; folds are keyed so the browser keeps them open.
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { parseCanvas } from "../shared/canvas.ts";
 import { diffFiles, diffSummary, planBlocks, type BlockPlan } from "../shared/plan.ts";
@@ -61,4 +62,25 @@ test("a Collapse is closed unless it says open or holds an unanswered Ask, and i
 test("the vocabulary no longer teaches agents to write open", () => {
   assert.doesNotMatch(VOCAB_DOC, /<Collapse title="…" open>/);
   assert.match(VOCAB_DOC, /one-line summary/);
+});
+
+const skill = readFileSync(new URL("../skill/agent-canvas/SKILL.md", import.meta.url).pathname, "utf8");
+
+test("both docs lead with Metric, Decision and Ask, and recast Diff as code-review evidence inside a closed Collapse", () => {
+  for (const doc of [VOCAB_DOC, skill]) {
+    const at = (s: string) => doc.indexOf(s);
+    for (const lead of ["<Metric", "<Decision", "<Ask"]) assert.ok(at(lead) > 0 && at(lead) < at("<Steps"), `${lead} comes before Steps`);
+    assert.match(doc, /<Diff [^\n]*code-review evidence only, inside a <Collapse>/);
+    assert.match(doc, /never in the Bluf, Steps or Metrics/);
+    assert.doesNotMatch(doc, /<Collapse title="[^"]*" open>/);
+  }
+});
+
+test("the SKILL.md vocabulary is VOCAB_DOC verbatim, so the two cannot drift", () => {
+  assert.ok(skill.includes(VOCAB_DOC));
+});
+
+test("the example in the guidance parses and plans as a Diff inside a closed Collapse", () => {
+  const [c] = planBlocks(tree(`<Collapse title="Code: the key change"><Diff file="src/app.ts">@@ -1 +1 @@\n-a\n+b</Diff></Collapse>`));
+  assert.ok(c.kind === "collapse" && !c.open && c.children[0].kind === "diff");
 });
