@@ -17,7 +17,7 @@ Show your work as a live canvas the human watches instead of reading chat. Write
   <Markdown id="notes">standard GitHub Markdown: headings, lists, task lists, tables, fenced code, links, > [!WARNING] alerts</Markdown>
   <Svg id="arch" alt="what it shows"><svg viewBox="0 0 400 200">…</svg></Svg>   a drawing you write by hand: the right choice for any figure that explains (architecture sketch, sequence, a 3-8 step flow, before/after)
   <Image src="out/chart.png" alt="…" />   a PNG/JPEG/WebP/GIF file inside your workspace
-  <Diff file="a.ts">unified diff</Diff>
+  <Diff file="a.ts">unified diff</Diff>   shows as a one-line summary (file, +/−) until tapped
   <Diagram id="flow" lang="dot" alt="…">digraph { a -> b }</Diagram>   Graphviz DOT, auto-laid-out: for a big graph or when layout is the hard part (dependency graphs, state machines)
   <Chart id="sales" lang="vega-lite" alt="…">{"data":{"values":[{"x":"a","y":1}]},"mark":"bar","encoding":{"x":{"field":"x","type":"nominal"},"y":{"field":"y","type":"quantitative"}}}</Chart>   Vega-Lite v5 JSON: bar, line, area, scatter, pie (arc), gantt (bar with x2)
 </Canvas>
