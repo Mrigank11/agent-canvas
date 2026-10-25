@@ -69,34 +69,34 @@ export const ICON_SVG: Record<(typeof ACTIVITY_ICONS)[number], string> = {
 const icon = (name: string) => `<svg class="ic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_SVG[name as keyof typeof ICON_SVG] ?? ICON_SVG.Wrench}</svg>`;
 
 /** The Now row. A <details> element, so tapping it opens the full command and the trail with no script (and the page's poll keeps it open). */
-export function activityRow(a: ActivityPlan): string {
+export function activityRow(a: ActivityPlan, foldPrefix?: string): string {
   const glyph = a.live ? `<span class="tg ${a.tone}">${icon(a.icon)}</span>` : '<span class="tg ring"></span>';
   const head = `${glyph}<span class="nt"><span class="nl">${esc(a.label)}</span>${a.target ? `<span class="mchip">${esc(a.target)}</span>` : ""}</span><span class="el ${a.tone}">${esc(a.elapsed)}</span>`;
   const cls = `now ${a.live ? a.tone : "idle"}${a.bookkeeping ? " book" : ""}`;
   if (!a.full && !a.recent.length) return `<div class="${cls}">${head}</div>`;
   const well = a.full ? `<div class="well">${a.full.split("\n").map((l) => `<span>${esc(l || " ")}</span>`).join("")}</div>` : "";
   const trail = a.recent.length ? `<ul class="trail">${a.recent.map((r) => `<li class="${r.ok ? "ok" : "err"}"><i class="tdot"></i>${esc(r.label)}${!r.ok && r.exitCode != null ? ` · exit ${r.exitCode}` : ""}</li>`).join("")}</ul>` : "";
-  return `<details class="nowd" data-k="now"><summary class="${cls}">${head}<span class="caret">›</span></summary><div class="nowx">${well}${trail}</div></details>`;
+  return `<details class="nowd"${foldPrefix ? ` id="${foldPrefix}-now"` : ""} data-k="now"><summary class="${cls}">${head}<span class="caret">›</span></summary><div class="nowx">${well}${trail}</div></details>`;
 }
 
 /**
  * One Background row: the Now row's grammar with a spinner and timer while running, a quiet check and the exit code once done,
  * and the one red-tinted row for a failure. A <details> so a tap shows the full command and the last Monitor event.
  */
-export function jobRow(r: JobRowPlan): string {
+export function jobRow(r: JobRowPlan, foldPrefix?: string): string {
   const tail = r.state === "running" ? sd("run", { spin: true, size: 14 }) : "";
   const head = `<span class="tg ${r.tone}">${icon(r.icon)}</span><span class="nt"><span class="nl">${esc(r.label)}</span>${r.target ? `<span class="mchip">${esc(r.target)}</span>` : ""}</span>${r.extra ? `<span class="jx">${esc(r.extra)}</span>` : ""}${tail}<span class="el ${r.tone}">${esc(r.elapsed)}</span>`;
   const cls = `now job ${r.tone}`;
   if (!r.full && !r.lastEvent) return `<div class="${cls}">${head}</div>`;
   const well = r.full ? `<div class="well">${r.full.split("\n").map((l) => `<span>${esc(l || " ")}</span>`).join("")}</div>` : "";
   const ev = r.lastEvent ? `<div class="meta">Last event: ${esc(r.lastEvent)}</div>` : "";
-  return `<details class="nowd" data-k="job-${esc(r.id)}"><summary class="${cls}">${head}<span class="caret">›</span></summary><div class="nowx">${well}${ev}</div></details>`;
+  return `<details class="nowd"${foldPrefix ? ` id="${foldPrefix}-job-${esc(r.id)}"` : ""} data-k="job-${esc(r.id)}"><summary class="${cls}">${head}<span class="caret">›</span></summary><div class="nowx">${well}${ev}</div></details>`;
 }
 /** B's compact form: one tinted chip for the Canvases list. */
 export const jobChip = (c: JobChipPlan) => `<span class="chip ${c.tone} jobchip">${esc(c.glyph)} ${esc(c.text)}</span>`;
 /** The Background group. On a phone the third row folds into "+n more" (CSS), so rows stay single-line. */
-export function backgroundGroup(b: BackgroundPlan): string {
-  const rows = b.rows.map((r, i) => `<div class="jr j${i + 1}">${jobRow(r)}</div>`).join("");
+export function backgroundGroup(b: BackgroundPlan, foldPrefix?: string): string {
+  const rows = b.rows.map((r, i) => `<div class="jr j${i + 1}">${jobRow(r, foldPrefix)}</div>`).join("");
   const more = b.more ? `<div class="meta jmore">${esc(b.more)}</div>` : "";
   // a third row hidden on a narrow screen is one more job behind the "+n more"
   const phone = b.rows.length > 2 ? `<div class="meta jmore jphone">+${(b.more ? Number(/\+(\d+)/.exec(b.more)?.[1] ?? 0) : 0) + b.rows.length - 2} more</div>` : "";
@@ -104,10 +104,11 @@ export function backgroundGroup(b: BackgroundPlan): string {
 }
 
 /** Paseo's own line. Facts are Paseo's; the agent cannot write into it. */
-export function statusLine(p: StatusPlan): string {
+/** `foldPrefix` (embed mode) gives the Now and job folds a page-unique id, so a host page keeps them open across refreshes. */
+export function statusLine(p: StatusPlan, foldPrefix?: string): string {
   const facts = p.facts.map((f) => `<span${f.signal ? ` class="c-${f.signal}"` : ""}>${esc(f.text)}</span>`);
   const l2 = [...(p.lead ? [`<b class="c-${p.leadSignal}">${esc(p.lead)}</b>`] : []), ...facts].join('<span class="sep"> · </span>');
-  return `<div class="statusline"><div class="l1">${badge(p.signal, p.label, p.signal === "ok" ? "check" : "dot")}${meta(p.run)}</div>${p.activity ? activityRow(p.activity) : ""}${p.background ? backgroundGroup(p.background) : ""}<div class="meta l2">${l2}</div>${p.flags.map(flagLine).join("")}</div>`;
+  return `<div class="statusline"><div class="l1">${badge(p.signal, p.label, p.signal === "ok" ? "check" : "dot")}${meta(p.run)}</div>${p.activity ? activityRow(p.activity, foldPrefix) : ""}${p.background ? backgroundGroup(p.background, foldPrefix) : ""}<div class="meta l2">${l2}</div>${p.flags.map(flagLine).join("")}</div>`;
 }
 
 // ---------- component CSS (var(--…) only) ----------

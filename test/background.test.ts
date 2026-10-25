@@ -326,3 +326,21 @@ test("the native client has the same rows, group, chip and spinner from the same
   assert.ok(src("client/canvas.tsx").includes("BG_CAP.phone"), "phone cap");
   for (const f of ["client/ui/atoms.tsx", "server/ui-html.ts"]) assert.ok(src(f).includes("spin"), `${f} spinner`);
 });
+
+// ---------- embed mode: every fold is addressable by the host page ----------
+
+test("embedded: every <details> in a canvas has a unique cv-<agent>- id, stable across renders", () => {
+  const body = `<Collapse id="c1" title="T"><Diff id="d1" file="a.ts">+x</Diff></Collapse>`;
+  const mk = (agentId: string) => withJobs([job({ id: "j1" }), job({ id: "j2", kind: "monitor", command: "tail -f x", lastEvent: "ev" })], { agentId, tree: tree(`<Canvas title="t" status="working">${body}</Canvas>`), activity: { kind: "shell", name: "Bash", command: "echo a\necho b", startedAt: NOW - 5000 }, recent: [{ label: "ls", ok: true, exitCode: 0, kind: "shell" } as never] });
+  const r = (agentId: string) => renderCanvas(mk(agentId), NOW, { embed: true });
+  const a = r("agent-a");
+  const opens = [...a.matchAll(/<details\b[^>]*>/g)].map((m) => m[0]);
+  assert.ok(opens.length >= 5, `expected Now, 2 jobs, Collapse and Diff folds, got ${opens.length}`);
+  const ids = opens.map((t) => /\sid="([^"]+)"/.exec(t)?.[1]);
+  for (const id of ids) assert.ok(id?.startsWith("cv-agent-a-"), `fold without a cv-agent-a- id: ${id}`);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.equal(a, r("agent-a"), "stable across renders");
+  const both = [...(a + r("agent-b")).matchAll(/<details\b[^>]*\sid="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(new Set(both).size, both.length, "unique across two canvases");
+  assert.doesNotMatch(renderCanvas(mk("agent-a"), NOW), /<details[^>]* id="cv-/, "the browser view keeps data-k only");
+});

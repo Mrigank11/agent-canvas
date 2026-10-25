@@ -96,7 +96,7 @@ export function renderCanvas(v: CanvasView, now: number, ctx: RenderCtx = {}): s
   const sp = statusPlan(v, now);
   const me = selfStatus(v, sp.label);
   const blocks = renderBlocks(v.tree, v.agentId, ctx);
-  const card = `<article class="canvas${sp.dim ? " dim" : ""}"><div class="sheet">${statusLine(sp)}<div class="trow dimmable"><span class="title">${esc(v.title)}</span>${meta(`· ${me.text}`, me.contradicted ? "c-warn" : "")}${v.agentUrl ? `<span style="margin-left:auto"><a href="${esc(v.agentUrl)}" target="_blank" rel="noopener noreferrer">Open agent in Paseo ↗</a></span>` : ""}</div><div class="sheet dimmable">${blocks || '<span class="c-idle">Nothing yet.</span>'}</div></div></article>`;
+  const card = `<article class="canvas${sp.dim ? " dim" : ""}"><div class="sheet">${statusLine(sp, ctx.embed ? `cv-${esc(v.agentId)}` : undefined)}<div class="trow dimmable"><span class="title">${esc(v.title)}</span>${meta(`· ${me.text}`, me.contradicted ? "c-warn" : "")}${v.agentUrl ? `<span style="margin-left:auto"><a href="${esc(v.agentUrl)}" target="_blank" rel="noopener noreferrer">Open agent in Paseo ↗</a></span>` : ""}</div><div class="sheet dimmable">${blocks || '<span class="c-idle">Nothing yet.</span>'}</div></div></article>`;
   return ctx.embed ? `<div class="acv">${card}</div>` : card;
 }
 
