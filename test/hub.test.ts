@@ -1,12 +1,11 @@
 import { test } from "node:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { Hub } from "../server/hub.ts";
 import { handleRpc } from "../server/mcp.ts";
 import { renderCanvas, renderIndex, esc } from "../server/html.ts";
-import { REANCHOR_AFTER } from "../shared/contract.ts";
 
 type Row = { id: string; data: any };
 function fake(opts: { status?: string; items?: any[]; maxSeq?: number } = {}) {
@@ -133,24 +132,24 @@ test("an agent with no canvas gets an auto canvas from its timeline", async () =
   h.stop();
 });
 
-test("the pane row is replaced in place, then moved to the bottom once the agent has written a screenful", async () => {
+test("a canvas change writes no timeline row", async () => {
   const { api, st } = fake();
   const h = hub();
   h.capture({ paseo: api }, "test");
   h.set("a1", CANVAS);
-  await wait();
-  assert.deepEqual(st.rows.map((r) => r.id), ["canvas-1"]);
   h.patch("a1", [{ id: "a", set: { state: "done" } }]);
-  await wait();
-  assert.deepEqual(st.rows.map((r) => r.id), ["canvas-1", "canvas-1"]); // same id: replaced in place
-  st.maxSeq = 1 + REANCHOR_AFTER;
-  await h.refresh("a1");
-  h.patch("a1", [{ id: "a", text: "moved" }]);
-  await wait();
-  assert.deepEqual(st.rows.slice(2).map((r) => r.id), ["canvas-1", "canvas-2"]);
-  assert.deepEqual(st.rows[2].data, { superseded: true });
-  assert.equal(st.rows[3].data.title, "T");
+  await wait(320);
+  assert.deepEqual(st.rows, []);
+  assert.equal(h.view("a1")!.title, "T");
   h.stop();
+});
+
+test("the timeline card cannot creep back: the client draws nothing for canvas rows and the hub never appends one", () => {
+  const read = (f: string) => readFileSync(new URL(`../${f}`, import.meta.url).pathname, "utf8");
+  const client = read("index.client.tsx");
+  assert.ok(!client.includes("CanvasRow") && !client.includes("client/timeline"), "no card renderer");
+  assert.match(client, /addTimelineRenderer\(\{[^}]*Component: \(\) => null/, "blank tombstone renderer");
+  assert.ok(!read("server/hub.ts").includes("timeline.append"), "hub writes no rows");
 });
 
 test("a canvas restored from disk is dropped when its agent is gone, but a live one is kept", async () => {

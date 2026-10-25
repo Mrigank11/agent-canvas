@@ -113,17 +113,17 @@ test("an agent that already has the MCP tools is not sent the recipe", async () 
   h.stop();
 });
 
-test("switching the global setting re-derives the view; a shown card is blanked when the canvas goes off", async () => {
+test("switching the global setting re-derives the view; the view goes when the canvas goes off", async () => {
   const { api, st } = fake();
   const { h, p } = make({ defaultOn: true, autoCanvas: true }, api);
   h.set("a1", CANVAS);
   await wait();
-  assert.equal(st.rows.length, 1);
+  assert.equal(st.rows.length, 0);
   p.defaultOn = false; p.autoCanvas = false;
   h.policyChanged();
   await wait();
   assert.equal(h.view("a1"), null);
-  assert.deepEqual(st.rows.at(-1)?.data, { superseded: true });
+  assert.equal(st.rows.length, 0);
   h.stop();
 });
 

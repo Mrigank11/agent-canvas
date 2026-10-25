@@ -92,7 +92,7 @@ export function jobRow(r: JobRowPlan): string {
   const ev = r.lastEvent ? `<div class="meta">Last event: ${esc(r.lastEvent)}</div>` : "";
   return `<details class="nowd" data-k="job-${esc(r.id)}"><summary class="${cls}">${head}<span class="caret">›</span></summary><div class="nowx">${well}${ev}</div></details>`;
 }
-/** B's compact form: one tinted chip for the timeline card and the Canvases list. */
+/** B's compact form: one tinted chip for the Canvases list. */
 export const jobChip = (c: JobChipPlan) => `<span class="chip ${c.tone} jobchip">${esc(c.glyph)} ${esc(c.text)}</span>`;
 /** The Background group. On a phone the third row folds into "+n more" (CSS), so rows stay single-line. */
 export function backgroundGroup(b: BackgroundPlan): string {

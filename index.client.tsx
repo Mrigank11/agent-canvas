@@ -3,7 +3,6 @@ import { SidePanelBody, LIST_SCREEN, ListItem, ListScreen } from "./client/scree
 import { CanvasProvider } from "./client/common";
 import { contributePills } from "./client/pill";
 import { CanvasSettings } from "./client/settings";
-import { CanvasRow } from "./client/timeline";
 import { ROW_KIND, ROW_VERSION, rowData } from "./shared/contract";
 
 export default function contribute(client: PluginClientContext) {
@@ -23,14 +22,15 @@ export default function contribute(client: PluginClientContext) {
         </CanvasProvider>
       ),
     }),
-    // The canvas tool calls are bookkeeping: the card shows their result, so the call rows are noise.
+    // The canvas tool calls are bookkeeping: the pill and panel show their result, so the call rows are noise.
     // Every other tool call stays: hiding those would hide what the agent actually did.
     client.addTimelineTransformer({
       id: "hide-canvas-calls",
       query: { itemType: "tool_call" },
       transform: ({ item }) => (/canvas_(set|patch|get)/.test(item.name) ? { items: [] } : undefined),
     }),
-    client.addTimelineRenderer({ kind: ROW_KIND, version: ROW_VERSION, schema: rowData, Component: CanvasRow }),
+    // Tombstone: rows older versions already wrote into live agents' timelines render as nothing. Remove after one release.
+    client.addTimelineRenderer({ kind: ROW_KIND, version: ROW_VERSION, schema: rowData, Component: () => null }),
     contributePills(client),
   ];
   return () => { for (const c of cleanups) c(); };

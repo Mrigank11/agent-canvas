@@ -2,11 +2,10 @@ import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import type { Node } from "./canvas.ts";
 
+// The canvas no longer writes timeline rows. These exist only so rows written by an older version still have a
+// (blank) renderer. Remove after one release; ROW_VERSION must stay 1 to match them.
 export const ROW_KIND = "agent-canvas";
 export const ROW_VERSION = 1;
-export const ROW_ID = "canvas";
-/** How many timeline items may pile up under the canvas row before it is moved back to the bottom. */
-export const REANCHOR_AFTER = 6;
 
 const nodeSchema = z.custom<Node>((v) => typeof v === "object" && v !== null && typeof (v as Node).tag === "string" && Array.isArray((v as Node).children));
 
@@ -32,7 +31,7 @@ export const bgJob = z.object({
 });
 export type BgJob = z.output<typeof bgJob>;
 
-/** One agent's canvas as the renderers see it. The same value is the timeline row data and the RPC output. */
+/** One agent's canvas as the renderers see it. The same value is the RPC output. */
 export const canvasView = z.object({
   agentId: z.string(),
   /** The workspace the agent lives in; the side panel shows the canvases of its own workspace. */
@@ -64,7 +63,7 @@ export const canvasView = z.object({
 });
 export type CanvasView = z.output<typeof canvasView>;
 
-/** What a timeline row holds: the canvas, or a stub left where the canvas used to be before it moved down. */
+/** What an old timeline row holds: the canvas, or a stub. Only the blank renderer for such rows still uses it. */
 export const rowData = z.union([canvasView, z.object({ superseded: z.literal(true) })]);
 
 export const listRpc = defineRpc({ name: "canvas.list", input: z.object({}), output: z.object({ views: z.array(canvasView), baseUrl: z.string() }) });
@@ -88,7 +87,7 @@ export const overrideRpc = defineRpc({
 });
 
 /**
- * The picture behind a hash: a PNG (or the small original) as base64, for the native Image component. The timeline row
+ * The picture behind a hash: a PNG (or the small original) as base64, for the native Image component. The RPC output
  * carries only hashes; this is how a phone gets the bytes, over the Paseo connection rather than the plugin's HTTP port.
  * `format: "svg"` (web and desktop clients) asks for a drawing as its sanitised SVG instead; anything that is not a
  * drawing, or is gone, still answers with the PNG/original, and `mime` says which one arrived.

@@ -83,7 +83,7 @@ const LAYOUT_TAGS = new Set(["Grid", "Collapse"]);
 const hasOpenAsk = (n: Node): boolean => (n.tag === "Ask" && !n.attrs.answer) || n.children.some(hasOpenAsk);
 
 /**
- * The container's blocks in order, with runs of Metrics merged into one row. With `only` (the timeline, popover and
+ * The container's blocks in order, with runs of Metrics merged into one row. With `only` (the popover and
  * pill show a few kinds) layout containers are transparent: what they hold is hoisted, so a Steps or Ask inside a
  * Grid is still shown there.
  */
@@ -164,7 +164,7 @@ export type BackgroundPlan = {
   rows: JobRowPlan[];
   /** Jobs beyond the cap: "+1 more · Monitor “deploy logs”" */
   more: string | null;
-  /** B's compact form, for the timeline card and the Canvases list. */
+  /** B's compact form, for the Canvases list. */
   chip: JobChipPlan;
   running: number;
 };

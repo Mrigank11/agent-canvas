@@ -1,7 +1,7 @@
 // The render pipeline. Each rich block (an <Svg>, an <Image>, a Markdown image) goes through one RichRenderer: it
 // validates the agent's input (atomically, errors go back to the agent), makes a content-addressed artefact, and can
 // later give the browser safe markup/bytes or the phone a PNG. Artefacts are keyed by sha256 of what was checked and
-// cached on disk, so the timeline row only ever carries hashes, never the drawing.
+// cached on disk, so the RPCs only ever carry hashes, never the drawing.
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -240,7 +240,7 @@ export class Assets {
   }
 
   /**
-   * The tree as the clients get it: drawings and images carry hashes and sizes instead of bodies, so the timeline row
+   * The tree as the clients get it: drawings and images carry hashes and sizes instead of bodies, so the RPC output
    * stays small whatever the canvas holds. A tree is never changed in place.
    */
   wire(root: Node, cwd: string | null): Node {

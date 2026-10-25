@@ -322,7 +322,6 @@ test("the native client has the same rows, group, chip and spinner from the same
   for (const s of ['variant="job"', "function JobRow", "export function JobGroup", "export function JobChip", "export function Spinner", "plan.background", "plan.leadSignal"]) assert.ok(atoms.includes(s), s);
   assert.ok(src("client/pill.tsx").includes("<JobGroup plan={plan.background}"), "popover");
   assert.ok(src("client/pill.tsx").includes("BG_CAP.popover"), "popover cap");
-  assert.ok(src("client/timeline.tsx").includes("<JobChip chip={plan.background.chip}"), "timeline card chip");
   assert.ok(src("client/screens.tsx").includes("<JobChip chip={plan.jobs}"), "Canvases list chip");
   assert.ok(src("client/canvas.tsx").includes("BG_CAP.phone"), "phone cap");
   for (const f of ["client/ui/atoms.tsx", "server/ui-html.ts"]) assert.ok(src(f).includes("spin"), `${f} spinner`);

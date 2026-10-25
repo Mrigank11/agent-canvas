@@ -15,7 +15,7 @@ import type { Inline, MdBlock } from "../shared/markdown";
 
 /**
  * The open question. `panel` is the one tinted region of a surface; `flat` sits inside a card that is already the
- * container (the timeline), so it only gets a hairline above it. Answered, it collapses to the chosen option.
+ * container (the pill popover), so it only gets a hairline above it. Answered, it collapses to the chosen option.
  */
 export function AskPanel({ plan, agentId, variant = "panel" }: { plan: Extract<BlockPlan, { kind: "ask" }>; agentId: string; variant?: "panel" | "flat" }) {
   const t = useT();

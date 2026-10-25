@@ -6,7 +6,7 @@ import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { autoCanvas, type AutoItem } from "../shared/auto.ts";
 import { BG_MONITOR_STARTED, BG_SHELL_STARTED, classifyActivity, oneLine, parseExitCode, type ActivityCall, type RecentCall } from "../shared/ui-spec.ts";
 import { findNode, parseCanvas, patchCanvas, serialize, walk, type Node, type PatchOp } from "../shared/canvas.ts";
-import { REANCHOR_AFTER, ROW_ID, ROW_KIND, ROW_VERSION, type BgJob, type CanvasView } from "../shared/contract.ts";
+import { type BgJob, type CanvasView } from "../shared/contract.ts";
 import type { RunState } from "../shared/honesty.ts";
 import { statusPlan } from "../shared/plan.ts";
 import { Assets } from "./render/assets.ts";
@@ -129,10 +129,6 @@ export class Hub {
   private live = new Map<string, Live>();
   private tokens = new Map<string, string | null>();
   private pending: { token: string; cwd: string; at: number }[] = [];
-  private lastRow = new Map<string, string>();
-  /** Which row id currently holds the canvas, and the timeline position it was written at. */
-  private anchor = new Map<string, { n: number; seq: number }>();
-  private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private poller: ReturnType<typeof setInterval> | null = null;
   private busy = new Set<string>();
   /** Failed refreshes back off per agent, and are logged once until one succeeds. */
@@ -186,7 +182,6 @@ export class Hub {
 
   stop() {
     if (this.poller) clearInterval(this.poller);
-    for (const t of this.timers.values()) clearTimeout(t);
     this.persist();
   }
 
@@ -497,8 +492,6 @@ export class Hub {
     this.snapshot(agentId);
     this.archived.add(agentId);
     this.live.delete(agentId);
-    this.lastRow.delete(agentId);
-    this.anchor.delete(agentId);
     if (this.authored.delete(agentId)) this.persist();
   }
 
@@ -714,47 +707,10 @@ export class Hub {
     };
   }
 
-  // ---------- the pane row ----------
+  // ---------- change tracking ----------
 
-  /** Something changed: re-publish the row, debounced so a burst of patches is one write. */
+  /** Something changed: bump the revision the consumer API reports (clients poll the RPCs, nothing is written to the timeline). */
   private changed(agentId: string) {
     this.revs.set(agentId, (this.revs.get(agentId) ?? 0) + 1);
-    if (this.timers.has(agentId)) return;
-    this.timers.set(agentId, setTimeout(() => { this.timers.delete(agentId); void this.publish(agentId); }, 250));
-  }
-
-  private async publish(agentId: string) {
-    const v = this.view(agentId);
-    if (!this.api) return;
-    if (!v) {
-      // The canvas was switched off for this agent: blank the card it already has in the pane.
-      const a = this.anchor.get(agentId);
-      if (a && this.lastRow.has(agentId)) {
-        this.lastRow.delete(agentId);
-        try { await this.api.agents.ref(agentId).timeline.append({ type: "plugin", id: `${ROW_ID}-${a.n}`, kind: ROW_KIND, version: ROW_VERSION, data: { superseded: true } }); } catch { /* best effort */ }
-      }
-      return;
-    }
-    // The row carries no clock: only real changes are written, so an idle agent costs nothing.
-    // (lastActivityAt is left out: appending the row itself is activity, which would republish forever)
-    const sig = JSON.stringify({ ...v, lastActivityAt: 0 });
-    if (this.lastRow.get(agentId) === sig) return;
-    this.lastRow.set(agentId, sig);
-    try {
-      const ref = this.api.agents.ref(agentId);
-      const seq = this.live.get(agentId)?.seq ?? 0;
-      let a = this.anchor.get(agentId);
-      if (!a) this.anchor.set(agentId, (a = { n: 1, seq }));
-      else if (seq - a.seq >= REANCHOR_AFTER) {
-        // The agent has written a screenful since the canvas row: leave an empty stub there and put the canvas at the bottom.
-        await ref.timeline.append({ type: "plugin", id: `${ROW_ID}-${a.n}`, kind: ROW_KIND, version: ROW_VERSION, data: { superseded: true } });
-        a.n++;
-        a.seq = seq;
-      }
-      await ref.timeline.append({ type: "plugin", id: `${ROW_ID}-${a.n}`, kind: ROW_KIND, version: ROW_VERSION, data: v });
-    } catch (e) {
-      this.lastRow.delete(agentId);
-      this.o.log(`append row for ${agentId} failed: ${(e as Error).message}`);
-    }
   }
 }
