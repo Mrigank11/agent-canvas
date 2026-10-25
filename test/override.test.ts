@@ -245,6 +245,7 @@ test("a 40-line shell command becomes one short line in the status", async () =>
 import { briefSnippet, recipe } from "../server/recipe.ts";
 test("the brief snippet takes the agent id from its shell, so a brief can carry it from the first turn", () => {
   const s = briefSnippet(6790);
+  assert.match(s, /code-review evidence/);
   assert.match(s, /http:\/\/127\.0\.0\.1:6790\/api\/canvas\/\$PASEO_AGENT_ID/);
   assert.match(s, /<Canvas title=/); // the vocabulary is in it
   assert.match(recipe("http://x/api/canvas/abc"), /curl -s -X POST http:\/\/x\/api\/canvas\/abc --data-binary/);

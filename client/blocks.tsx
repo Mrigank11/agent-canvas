@@ -221,26 +221,32 @@ function MdBlockView({ b }: { b: MdBlock }) {
 
 function Diff({ plan }: { plan: Extract<BlockPlan, { kind: "diff" }> }) {
   const t = useT();
+  const [open, setOpen] = useState(false);
   const row = (k: string) => (k === "add" ? { c: ink(t, "ok"), bg: t.sig("ok").tint } : k === "del" ? { c: ink(t, "err"), bg: t.sig("err").tint } : k === "hunk" ? { c: ink(t, "run"), bg: "transparent" } : { c: t.muted, bg: "transparent" });
+  const head = plan.summary.slice(0, plan.summary.lastIndexOf(" · "));
   return (
-    <Section>
-      {plan.file ? (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Txt role="mono" c="fg">{plan.file}</Txt>
-          <Text style={[typeStyle("mono", "500")]}>
-            <Text style={{ color: ink(t, "ok") }}>+{plan.add}</Text>
-            <Text style={{ color: t.muted }}> </Text>
-            <Text style={{ color: ink(t, "err") }}>−{plan.del}</Text>
-          </Text>
+    <View style={{ borderWidth: 1, borderColor: t.line, borderRadius: 10, paddingHorizontal: 12 }}>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen(!open)} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 9 }}>
+        <Text style={[typeStyle("body"), { color: t.muted, width: 10 }]}>{open ? "⌄" : "›"}</Text>
+        <Txt role="mono" c="fg" numberOfLines={1} style={{ flexShrink: 1 }}>{head}</Txt>
+        <Text style={[typeStyle("mono", "500")]}>
+          <Text style={{ color: ink(t, "ok") }}>+{plan.add}</Text>
+          <Text style={{ color: t.muted }}> </Text>
+          <Text style={{ color: ink(t, "err") }}>−{plan.del}</Text>
+        </Text>
+      </Pressable>
+      {open ? (
+        <View style={{ gap: 8, paddingBottom: 12 }}>
+          {plan.files.length > 1 ? plan.files.map((f) => <Txt key={f} role="mono" c="muted">{f}</Txt>) : null}
+          <Well>
+            {plan.lines.map((l, i) => {
+              const r = row(l.kind);
+              return <Text key={i} style={[typeStyle("mono"), { color: r.c, backgroundColor: r.bg, paddingHorizontal: 12, opacity: l.kind === "hunk" ? 0.8 : 1 }]}>{l.text || " "}</Text>;
+            })}
+          </Well>
         </View>
       ) : null}
-      <Well>
-        {plan.lines.map((l, i) => {
-          const r = row(l.kind);
-          return <Text key={i} style={[typeStyle("mono"), { color: r.c, backgroundColor: r.bg, paddingHorizontal: 12, opacity: l.kind === "hunk" ? 0.8 : 1 }]}>{l.text || " "}</Text>;
-        })}
-      </Well>
-    </Section>
+    </View>
   );
 }
 

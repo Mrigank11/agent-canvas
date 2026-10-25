@@ -18,7 +18,7 @@ export type BlockPlan =
   | { kind: "metrics"; id: string; items: MetricPlan[] }
   | { kind: "decision"; id: string; label: string; chosen: string | null; reason: string }
   | { kind: "ask"; id: string; question: string; answered: string | null; /** a pick sent to a relay agent and not yet delivered, as the option label */ pending: string | null; options: { value: string; label: string }[] }
-  | { kind: "diff"; id: string; file: string | null; add: number; del: number; lines: DiffLine[] }
+  | { kind: "diff"; id: string; file: string | null; /** every file the body touches (else the `file` attribute), in order */ files: string[]; add: number; del: number; /** the closed header: "src/a.ts · +5 −2", "3 files · +40 −12" or "Diff · +5 −2" */ summary: string; lines: DiffLine[] }
   | { kind: "markdown"; id: string; blocks: MdBlock[] }
   /** Layout: `cols` is the wide-screen count (a compact surface draws one). `open` is forced when an unanswered Ask is inside. */
   | { kind: "grid"; id: string; cols: number; /** natural width of the widest drawing directly in it, 0 if none: a grid gives such a drawing a wider cell by using fewer columns */ wide: number; children: BlockPlan[] }
@@ -32,6 +32,21 @@ const assetOf = (a: Node["attrs"]): { hash: string | null; w: number; h: number 
 
 export function diffLines(text: string): DiffLine[] {
   return text.split("\n").map((l) => ({ kind: l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : l.startsWith("@@") ? "hunk" : "ctx", text: l }));
+}
+
+/** The files a unified diff touches, in order: the `b/` side of `diff --git` and `+++` lines, `/dev/null` skipped. */
+export function diffFiles(text: string): string[] {
+  const out: string[] = [];
+  for (const l of text.split("\n")) {
+    const m = /^diff --git a\/.* b\/(.+)$/.exec(l) ?? /^\+\+\+ (?:b\/)?(\S.*?)(?:\t.*)?$/.exec(l);
+    if (m && m[1] !== "/dev/null" && !out.includes(m[1])) out.push(m[1]);
+  }
+  return out;
+}
+
+/** The one line a closed Diff shows. */
+export function diffSummary(files: string[], add: number, del: number): string {
+  return `${files.length === 1 ? files[0] : files.length > 1 ? `${files.length} files` : "Diff"} · +${add} −${del}`;
 }
 
 function stepsPlan(n: Node): Extract<BlockPlan, { kind: "steps" }> {
@@ -62,7 +77,12 @@ export function planBlock(n: Node): BlockPlan | null {
     }
     case "Diff": {
       const lines = diffLines(n.text);
-      return { kind: "diff", id: n.id, file: n.attrs.file ? String(n.attrs.file) : null, add: lines.filter((l) => l.kind === "add" && !l.text.startsWith("+++")).length, del: lines.filter((l) => l.kind === "del" && !l.text.startsWith("---")).length, lines };
+      const file = n.attrs.file ? String(n.attrs.file) : null;
+      const found = diffFiles(n.text);
+      const files = found.length ? found : file ? [file] : [];
+      const add = lines.filter((l) => l.kind === "add" && !l.text.startsWith("+++")).length;
+      const del = lines.filter((l) => l.kind === "del" && !l.text.startsWith("---")).length;
+      return { kind: "diff", id: n.id, file, files, add, del, summary: diffSummary(files, add, del), lines };
     }
     case "Markdown": {
       const md = parseMarkdown(n.text);

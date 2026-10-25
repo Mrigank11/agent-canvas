@@ -55,6 +55,9 @@ function mdBlock(b: MdBlock): string {
   }
 }
 
+/** In embed mode (many canvases on one page, no script of ours) a fold gets a page-unique id, so the host page can keep it open across refreshes. */
+const foldId = (agentId: string, kind: "c" | "d", id: string, ctx: RenderCtx) => (ctx.embed ? ` id="cv-${esc(agentId)}-${kind}-${esc(id)}"` : "");
+
 export function renderPlan(p: BlockPlan, agentId: string, ctx: RenderCtx = {}): string {
   switch (p.kind) {
     case "bluf": return `<p class="lede">${esc(p.text)}</p>`;
@@ -68,8 +71,11 @@ export function renderPlan(p: BlockPlan, agentId: string, ctx: RenderCtx = {}): 
       if (p.pending !== null) return `<div class="ask"><div class="slabel">${sd("hot", { halo: false, pulse: false, size: 6 })}<span>Question</span></div><div class="q">${esc(p.question)}</div>${chip("run", `Sent to the first mate: ${p.pending}`, "… ")}</div>`;
       if (ctx.embed) return `<div class="ask"><div class="slabel">${sd("hot", { halo: false, pulse: false, size: 6 })}<span>Question</span></div><div class="q">${esc(p.question)}</div>${meta("Answer on the card")}</div>`;
       return `<div class="ask"><div class="slabel">${sd("hot", { halo: false, pulse: false, size: 6 })}<span>Question</span></div><div class="q">${esc(p.question)}</div><div class="btns">${p.options.map((o) => button("secondary", o.label, `data-agent="${esc(agentId)}" data-ask="${esc(p.id)}" data-value="${esc(o.value)}"`)).join("")}</div></div>`;
-    case "diff":
-      return `<div class="sec">${p.file ? `<div class="pathrow"><span class="path">${esc(p.file)}</span><span class="dstat"><span class="a">+${p.add}</span> <span class="d">−${p.del}</span></span></div>` : ""}<div class="well">${p.lines.map((l) => `<span class="${l.kind === "ctx" ? "" : l.kind}">${esc(l.text || " ")}</span>`).join("")}</div></div>`;
+    case "diff": {
+      const [stat] = p.summary.split(" · ").slice(-1);
+      const head = p.summary.slice(0, p.summary.length - stat.length - 3);
+      return `<details class="diff"${foldId(agentId, "d", p.id, ctx)} data-k="d-${esc(p.id)}"><summary><span class="path">${esc(head)}</span><span class="dstat"><span class="a">+${p.add}</span> <span class="d">−${p.del}</span></span></summary>${p.files.length > 1 ? `<div class="meta">${p.files.map(esc).join("<br>")}</div>` : ""}<div class="well">${p.lines.map((l) => `<span class="${l.kind === "ctx" ? "" : l.kind}">${esc(l.text || " ")}</span>`).join("")}</div></details>`;
+    }
     case "markdown": return `<div class="md">${p.blocks.map(mdBlock).join("")}</div>`;
     case "svg": {
       const svg = p.hash ? ctx.svg?.(p.hash) : null;
@@ -77,7 +83,7 @@ export function renderPlan(p: BlockPlan, agentId: string, ctx: RenderCtx = {}): 
     }
     case "image": return figure(p.hash, p.alt, p.w, p.h, ctx.assetBase);
     case "grid": return `<div class="grid" style="--cols:${gridColumns(p.cols, PAGE_CONTENT_WIDTH, p.wide)}">${p.children.map((c) => `<div class="cell">${renderPlan(c, agentId, ctx)}</div>`).join("")}</div>`;
-    case "collapse": return `<details class="collapse"${p.open && !ctx.embed ? " open" : ""}><summary>${esc(p.title)}</summary><div class="cbody">${p.children.map((c) => renderPlan(c, agentId, ctx)).join("")}</div></details>`;
+    case "collapse": return `<details class="collapse"${foldId(agentId, "c", p.id, ctx)} data-k="c-${esc(p.id)}"${p.open && !ctx.embed ? " open" : ""}><summary>${esc(p.title)}</summary><div class="cbody">${p.children.map((c) => renderPlan(c, agentId, ctx)).join("")}</div></details>`;
   }
 }
 

@@ -37,7 +37,7 @@ Standard formats for content, custom tags for state. `<Markdown>` takes CommonMa
 
 ### Layout: `<Grid>` and `<Collapse>`
 
-`<Grid cols={1..3}>` lays any blocks side by side; `<Collapse title open>` folds them away. Both hold any block (including each other) and count toward the nesting limit, now 5. The plan (`grid`, `collapse` in `shared/plan.ts`) nests; the browser draws CSS grid and `<details>`, native draws flex rows and a pressable section. Below `GRID_COMPACT_BELOW` (560 px, `shared/ui-spec.ts`) both draw one column: the browser by media query, native by `gridColumns`. An unanswered `<Ask>` inside a Collapse forces it open, and surfaces that show only some kinds (timeline, popover, pill) see through layout to the Steps and Ask inside. Tests: `test/layout.test.ts`.
+`<Grid cols={1..3}>` lays any blocks side by side; `<Collapse title [open]>` folds them away (closed unless `open`). `<Diff>` is a fold too: its header is one line (`src/app.ts · +5 −2`, or `3 files · +40 −12`) until tapped. Every fold is keyed (`data-k`), so one opened in the browser stays open across live updates. Both hold any block (including each other) and count toward the nesting limit, now 5. The plan (`grid`, `collapse` in `shared/plan.ts`) nests; the browser draws CSS grid and `<details>`, native draws flex rows and a pressable section. Below `GRID_COMPACT_BELOW` (560 px, `shared/ui-spec.ts`) both draw one column: the browser by media query, native by `gridColumns`. An unanswered `<Ask>` inside a Collapse forces it open, and surfaces that show only some kinds (timeline, popover, pill) see through layout to the Steps and Ask inside. Tests: `test/layout.test.ts`.
 
 ### Pictures: `<Svg>`, `<Image>` and Markdown images
 

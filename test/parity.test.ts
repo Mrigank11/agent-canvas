@@ -94,6 +94,11 @@ test("pictures: both renderers draw the plan's hash, alt text and size, the brow
   assert.doesNotMatch(native, /\bfetch\(|XMLHttpRequest|https?:\/\//, "native reaches pictures only through the RPC");
 });
 
+test("a Diff is a closed fold in both renderers, fed by the plan's summary and file list", () => {
+  const native = read("client/blocks.tsx");
+  for (const f of ["plan.summary", "plan.files", "plan.add", "plan.del", "useState(false)"]) assert.ok(native.includes(f), `native Diff does not use ${f}`);
+});
+
 const has = (html: string, s: string) => assert.ok(html.includes(s), `HTML is missing ${s}`);
 
 test("for the showcase canvas, the HTML agrees with the plan on signal, glyph and text", () => {
