@@ -84,3 +84,16 @@ test("the example in the guidance parses and plans as a Diff inside a closed Col
   const [c] = planBlocks(tree(`<Collapse title="Code: the key change"><Diff file="src/app.ts">@@ -1 +1 @@\n-a\n+b</Diff></Collapse>`));
   assert.ok(c.kind === "collapse" && !c.open && c.children[0].kind === "diff");
 });
+
+test("embedded folds carry a page-unique, stable id; the browser view only a data-k", () => {
+  const body = `<Collapse id="c1" title="T"><Diff id="d1" file="a.ts">+x</Diff></Collapse>`;
+  const r = (agent: string, embed: boolean) => renderBlocks(tree(body), agent, { embed });
+  const a = r("agent-a", true);
+  assert.match(a, /<details class="collapse" id="cv-agent-a-c-c1" data-k="c-c1">/);
+  assert.match(a, /<details class="diff" id="cv-agent-a-d-d1" data-k="d-d1">/);
+  assert.equal(a, r("agent-a", true), "stable across renders");
+  assert.match(r("agent-b", true), /id="cv-agent-b-c-c1"/);
+  const ids = [...(a + r("agent-b", true)).matchAll(/ id="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(new Set(ids).size, ids.length, "unique across two agents");
+  assert.doesNotMatch(r("agent-a", false), / id="cv-/);
+});
