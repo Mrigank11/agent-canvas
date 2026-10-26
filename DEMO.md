@@ -1,14 +1,14 @@
 # agent-canvas demo: how to try it
 
-Repo `/home/mrigank/projects/llm-exp/agent-canvas` (extracted from the paseo-firstmate repo, history kept). Nothing here touches your live daemon: the demo runs its own daemon (home `/home/mrigank/.paseo-canvas-demo`, port **6781**) and its own canvas web server (port **6790**). The live daemon is `~/.paseo` on 6767 and was only ever read.
+Repo `<repo>` (extracted from the paseo-firstmate repo, history kept). Nothing here touches your live daemon: the demo runs its own daemon (home `~/.paseo-canvas-demo`, port **6781**) and its own canvas web server (port **6790**). The live daemon is `~/.paseo` on 6767 and was only ever read.
 
 ## 1. Open it
 
 | What | Where |
 |---|---|
-| Browser view (all agents) | http://manjaro.tail2e75.ts.net:6790/ (same at http://100.101.33.17:6790/) |
-| **Paseo web app, native view (easiest)** | **http://manjaro.tail2e75.ts.net:6781/** (same at http://100.101.33.17:6781/). The demo daemon now serves the Paseo web UI itself (`features.webUi.enabled: true` in its config, per paseo.sh/docs/web-ui), so the page auto-connects back to that daemon: no "add host" step. Open it from any device on your tailnet. |
-| Other Paseo clients (desktop/phone app) | Add a **Direct connection**: host `manjaro.tail2e75.ts.net`, port **6781**, no SSL, no password. |
+| Browser view (all agents) | http://<your-host>:6790/ (same at http://<your-tailnet-ip>:6790/) |
+| **Paseo web app, native view (easiest)** | **http://<your-host>:6781/** (same at http://<your-tailnet-ip>:6781/). The demo daemon now serves the Paseo web UI itself (`features.webUi.enabled: true` in its config, per paseo.sh/docs/web-ui), so the page auto-connects back to that daemon: no "add host" step. Open it from any device on your tailnet. |
+| Other Paseo clients (desktop/phone app) | Add a **Direct connection**: host `<your-host>`, port **6781**, no SSL, no password. |
 | Hosted app.paseo.sh | Does **not** work for this daemon from a normal browser: an https page cannot open the plain `ws://` connection (mixed content). Use the URL above instead. |
 
 Verified: loaded the URL in plain headless Chrome (fresh profile, no special flags): the sidebar shows the demo workspaces and **Canvases** opens the native canvas screen. Not checked on a phone. There is no password on this daemon (tailnet only), and the page is plain http.
@@ -16,7 +16,7 @@ Verified: loaded the URL in plain headless Chrome (fresh profile, no special fla
 ### Getting back to the agent from a canvas
 
 - **Native (Canvases screen):** tap a tile, then **Open agent**: it opens that agent's workspace and chat in the app (verified: "Pick a database" landed on its own workspace).
-- **Browser view (:6790):** every canvas page has **Open agent in Paseo ↗** next to the title. It opens `http://manjaro.tail2e75.ts.net:6781/h/<serverId>/agent/<agentId>` (Paseo's own route, checked in the app bundle) in a new tab. **Caveat:** open the web UI root (http://manjaro.tail2e75.ts.net:6781/) once in that browser first. On a brand-new browser profile the deep link alone redirects to the start page because the app has not registered the host yet; after the first visit it lands on the right agent (verified).
+- **Browser view (:6790):** every canvas page has **Open agent in Paseo ↗** next to the title. It opens `http://<your-host>:6781/h/<serverId>/agent/<agentId>` (Paseo's own route, checked in the app bundle) in a new tab. **Caveat:** open the web UI root (http://<your-host>:6781/) once in that browser first. On a brand-new browser profile the deep link alone redirects to the start page because the app has not registered the host yet; after the first visit it lands on the right agent (verified).
 - Inside an agent's own pane the canvas is already the chat view, so there is no back link there.
 
 ## 2. What the six demo agents show
@@ -68,29 +68,29 @@ Precedence is **per-agent override, then global switch, then default**. Override
 
 **Label timing:** the label is not visible when the agent is created, so the recipe is sent right after its first turn starts (it arrived before the first tool call in my check). If a first turn is very short it can finish first. For zero wait, paste the output of `node server/brief-snippet.ts` into the brief (it uses `$PASEO_AGENT_ID`); see the README.
 
-To flip the global switch in the demo, use the settings screen above (changes apply at once), or edit `/home/mrigank/.paseo-canvas-demo/plugin-settings/agent-canvas/canvas.json` (`{"defaultOn":false,"autoCanvas":false}`, wrapped as Paseo stores it) and reload the plugin.
+To flip the global switch in the demo, use the settings screen above (changes apply at once), or edit `~/.paseo-canvas-demo/plugin-settings/agent-canvas/canvas.json` (`{"defaultOn":false,"autoCanvas":false}`, wrapped as Paseo stores it) and reload the plugin.
 
 ## 4. Replay
 
 The demo agents run once. To get a fresh run (e.g. to watch the Disputed window again):
 
 ```
-cd /home/mrigank/projects/llm-exp/agent-canvas/demo
+cd <repo>/demo
 ./start.sh reset          # archive everything on the demo daemon, start all six
 ./start.sh overconfident  # or: deploy | decision | silent | showcase | plain
 ```
 `start.sh` refuses to run against `~/.paseo`. The agents are already freshly started as of this note, so Disputed/Stale are visible in the first ~2 minutes; later use `./start.sh overconfident` (~2 min window).
 
-You can also make your own: `paseo --home /home/mrigank/.paseo-canvas-demo run --env AGENT_CANVAS=on --provider claude --model claude-sonnet-5-5 "…"`. `AGENT_CANVAS=on` is the opt-in: the plugin's `agent.create` hook injects the canvas MCP server for that agent.
+You can also make your own: `paseo --home ~/.paseo-canvas-demo run --env AGENT_CANVAS=on --provider claude --model claude-sonnet-5-5 "…"`. `AGENT_CANVAS=on` is the opt-in: the plugin's `agent.create` hook injects the canvas MCP server for that agent.
 
 ## 5. Stop and clean up
 
 ```
-paseo --home /home/mrigank/.paseo-canvas-demo plugin remove agent-canvas
-paseo --home /home/mrigank/.paseo-canvas-demo daemon stop
-rm -rf /home/mrigank/.paseo-canvas-demo /tmp/canvas-demo-work     # optional: wipes demo state
+paseo --home ~/.paseo-canvas-demo plugin remove agent-canvas
+paseo --home ~/.paseo-canvas-demo daemon stop
+rm -rf ~/.paseo-canvas-demo /tmp/canvas-demo-work     # optional: wipes demo state
 ```
-Always keep `--home /home/mrigank/.paseo-canvas-demo`. Without it `paseo` targets your live daemon. After a stop, `paseo --home /home/mrigank/.paseo-canvas-demo daemon start` brings it back; if the config is lost it must have `"listen": "100.101.33.17:6781"` and `"pluginsEnabled": true`, then `paseo --home … plugin install /home/mrigank/projects/llm-exp/agent-canvas`. The daemon died once under load during my testing and rewrote its own config; I restored it.
+Always keep `--home ~/.paseo-canvas-demo`. Without it `paseo` targets your live daemon. After a stop, `paseo --home ~/.paseo-canvas-demo daemon start` brings it back; if the config is lost it must have `"listen": "<your-tailnet-ip>:6781"` and `"pluginsEnabled": true`, then `paseo --home … plugin install <repo>`. The daemon died once under load during my testing and rewrote its own config; I restored it.
 
 ## 6. What is real and what is a prototype
 

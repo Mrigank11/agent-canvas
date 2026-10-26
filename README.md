@@ -80,7 +80,7 @@ What the plugin can see (Paseo 0.12, Claude Code only): the start from Claude's 
 - `POST /api/canvas/<key>` and `/mcp/<key>` resolve `<key>` to a creation token or to an agent id Paseo knows (not archived); anything else is 404. They are accepted from this machine only.
 - `POST /api/answer` needs the page token (`x-canvas-token`, a per-process secret the served pages carry, so a blind cross-site or script POST fails) or the relay key; 401 with neither, 403 with a wrong one. The read pages stay open on the tailnet.
 - The relay key is minted on first start at `<daemon home>/agent-canvas/relay.key` (0600).
-- Listening: `127.0.0.1` plus the tailnet address (100.64.0.0/10) by default, not `0.0.0.0`. `AGENT_CANVAS_BIND` takes a comma-separated list (`0.0.0.0` for every interface, as before).
+- Listening: `127.0.0.1` plus the tailnet address (the Tailscale CGNAT range) by default, not `0.0.0.0`. `AGENT_CANVAS_BIND` takes a comma-separated list (`0.0.0.0` for every interface, as before).
 
 ## Who gets a canvas (configuration)
 

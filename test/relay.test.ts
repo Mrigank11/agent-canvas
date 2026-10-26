@@ -333,13 +333,13 @@ test("bind: loopback plus the tailnet address by default, never every interface"
   const ifs: any = {
     lo: [{ address: "127.0.0.1", family: "IPv4", internal: true }],
     eth0: [{ address: "192.168.1.5", family: "IPv4", internal: false }],
-    tailscale0: [{ address: "100.101.102.103", family: "IPv4", internal: false }, { address: "fd7a::1", family: "IPv6", internal: false }],
+    tailscale0: [{ address: "100.64.0.10", family: "IPv4", internal: false }, { address: "fd7a::1", family: "IPv6", internal: false }],
   };
-  assert.deepEqual(bindHosts(undefined, ifs), ["127.0.0.1", "100.101.102.103"]);
-  assert.deepEqual(bindHosts("", ifs), ["127.0.0.1", "100.101.102.103"]);
+  assert.deepEqual(bindHosts(undefined, ifs), ["127.0.0.1", "100.64.0.10"]);
+  assert.deepEqual(bindHosts("", ifs), ["127.0.0.1", "100.64.0.10"]);
   assert.deepEqual(bindHosts(undefined, { lo: ifs.lo, eth0: ifs.eth0 }), ["127.0.0.1"]);
   assert.deepEqual(bindHosts("0.0.0.0", ifs), ["0.0.0.0"]);
-  assert.deepEqual(bindHosts("127.0.0.1, 100.1.1.1", ifs), ["127.0.0.1", "100.1.1.1"]);
+  assert.deepEqual(bindHosts("127.0.0.1, 100.64.0.11", ifs), ["127.0.0.1", "100.64.0.11"]);
   assert.equal(isTailnetIp("100.64.0.1"), true);
   assert.equal(isTailnetIp("100.128.0.1"), false);
   assert.equal(isTailnetIp("192.168.1.1"), false);

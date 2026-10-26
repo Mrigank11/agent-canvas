@@ -1,6 +1,7 @@
 {
   "name": "agent-canvas",
   "private": true,
+  "license": "MIT",
   "version": "0.0.0",
   "files": [
     "paseo-plugin.json",
