@@ -18,7 +18,7 @@ npm test           # node --test, no network, no daemon needed
 paseo plugin install /absolute/path/to/agent-canvas        # add --host <url> or --home <dir> to target a daemon
 paseo plugin ls
 ```
-Plugins are trusted code; read `OVERVIEW.md` for what it does and where it listens (port 6790, `AGENT_CANVAS_PORT`; set `AGENT_CANVAS_PUBLIC_URL` and `AGENT_CANVAS_APP_URL` to the host name clients should use, the defaults point at one specific tailnet host).
+Plugins are trusted code; read `OVERVIEW.md` for what it does and where it listens (port 6790, `AGENT_CANVAS_PORT`; set `AGENT_CANVAS_PUBLIC_URL` and `AGENT_CANVAS_APP_URL` to the host name clients should use, the default is `127.0.0.1`; or copy `agent-canvas.local.example.json` to the gitignored `agent-canvas.local.json` in the plugin dir to set both once; env vars win over the file).
 
 ## Demo
 

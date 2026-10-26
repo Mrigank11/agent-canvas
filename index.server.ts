@@ -9,12 +9,12 @@ import { agentDeepLink } from "./shared/links.ts";
 import { startHttp } from "./server/http.ts";
 import { bindHosts, relayKey } from "./server/bind.ts";
 import { randomBytes } from "node:crypto";
+import { resolveUrls } from "./server/urls.ts";
 import { recipe } from "./server/recipe.ts";
 
 const PORT = Number(process.env.AGENT_CANVAS_PORT ?? 6790);
 const BIND = bindHosts(process.env.AGENT_CANVAS_BIND);
-const PUBLIC = (process.env.AGENT_CANVAS_PUBLIC_URL ?? `http://manjaro.tail2e75.ts.net:${PORT}`).replace(/\/$/, "");
-const APP = (process.env.AGENT_CANVAS_APP_URL ?? "http://manjaro.tail2e75.ts.net:6781").replace(/\/$/, "");
+const { publicUrl: PUBLIC, appUrl: APP } = resolveUrls(process.env, import.meta.dirname, PORT);
 const LOCAL = `http://127.0.0.1:${PORT}`;
 const KEY = "AGENT_CANVAS_KEY";
 
