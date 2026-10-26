@@ -4,11 +4,11 @@ import { ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
 import type { CanvasView } from "../shared/contract";
-import { rowPlan, type RowPlan } from "../shared/plan";
+import { rowPlan, switcherPlan, type RowPlan } from "../shared/plan";
 import { SPACE } from "../shared/ui-spec";
 import { CanvasBody, useLiveAgent } from "./canvas";
 import { CanvasProvider, openUrl, useNow, useViews } from "./common";
-import { Button, FlagLine, JobChip, Meta, ProgressTicks, Segmented, StatusBadge, StatusDot, Txt } from "./ui/atoms";
+import { Button, FlagLine, JobChip, Meta, ProgressTicks, Switcher, StatusBadge, StatusDot, Txt } from "./ui/atoms";
 import { UiRoot, useT, type Theme } from "./ui/tokens";
 import { useFocusedAgent } from "./store";
 
@@ -108,7 +108,7 @@ export function SidePanelBody({ workspaceId, theme, layout }: { workspaceId: str
   return (
     <UiRoot theme={theme}>
       <ScrollView style={{ flex: 1, backgroundColor: theme.colors.surface0 }} contentContainerStyle={{ padding: layout.compact ? SPACE.panel : SPACE.panel, gap: SPACE.block }}>
-        {mine.length > 1 ? <Segmented items={mine.map((v) => ({ id: v.agentId, label: v.title, tone: rowPlan(v, now).signal }))} value={shownId} onChange={(id) => setPicked({ agentId: id, focusWas: focused })} /> : null}
+        {mine.length > 1 ? <Switcher plan={switcherPlan(mine, shownId, now)} onChange={(id) => setPicked({ agentId: id, focusWas: focused })} /> : null}
         {view ? (
           <CanvasBody view={view} theme={theme} live={shownId === view.agentId ? live : null} footer={<Button variant="ghost" label="Open in browser ↗" onPress={() => openUrl(view.url)} />} />
         ) : (

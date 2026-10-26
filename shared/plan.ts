@@ -314,4 +314,16 @@ export function rowPlan(view: CanvasView, now: number): RowPlan {
   };
 }
 
+export type SwitcherItem = { agentId: string; title: string; signal: Tone };
+export type SwitcherPlan = { current: SwitcherItem | null; count: number; groups: { key: "running" | "done"; label: string; items: SwitcherItem[] }[] };
+/** The one-line canvas switcher: the shown canvas plus a count, and the rest grouped by running and done (needs-you first within each). */
+export function switcherPlan(views: CanvasView[], shownId: string | null, now: number): SwitcherPlan {
+  const rows = views.map((v) => ({ v, r: rowPlan(v, now) }));
+  const item = ({ r }: (typeof rows)[number]): SwitcherItem => ({ agentId: r.agentId, title: r.title, signal: r.signal });
+  const order = (a: (typeof rows)[number], b: (typeof rows)[number]) => Number(b.r.needsYou) - Number(a.r.needsYou) || b.v.lastActivityAt - a.v.lastActivityAt;
+  const group = (key: "running" | "done", label: string) => ({ key, label, items: rows.filter(({ v }) => (v.runState === "running") === (key === "running")).sort(order).map(item) });
+  const current = rows.find(({ r }) => r.agentId === shownId);
+  return { current: current ? item(current) : null, count: rows.length, groups: [group("running", "Running"), group("done", "Done")].filter((g) => g.items.length) };
+}
+
 export { runSignal, TONES };

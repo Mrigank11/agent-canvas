@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { AccessibilityInfo, Animated, Pressable, ScrollView, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import type { StepState } from "../../shared/canvas";
-import type { ActivityPlan, BackgroundPlan, FlagPlan, JobChipPlan, JobRowPlan, StatusPlan } from "../../shared/plan";
+import type { ActivityPlan, BackgroundPlan, FlagPlan, JobChipPlan, JobRowPlan, StatusPlan, SwitcherPlan } from "../../shared/plan";
 import { FLAG_GLYPH, RADIUS, STEP_GLYPH, stepSignal, type Delta, type Tone } from "../../shared/ui-spec";
 import { ink, typeStyle, useT, type Ink } from "./tokens";
 
@@ -361,20 +361,38 @@ export function StatusLine({ plan, hairline = true }: { plan: StatusPlan; hairli
   );
 }
 
-/** The agent switcher: one segment per agent, each with its own status dot. */
-export function Segmented({ items, value, onChange }: { items: { id: string; label: string; tone: Tone }[]; value: string | null; onChange: (id: string) => void }) {
+/** The canvas switcher: one line (state dot, current title, count, chevron) that opens a list grouped by running and done. */
+export function Switcher({ plan, onChange }: { plan: SwitcherPlan; onChange: (id: string) => void }) {
   const t = useT();
+  const [open, setOpen] = useState(false);
+  const cur = plan.current;
   return (
-    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 2 }}>
-      {items.map((it) => {
-        const on = it.id === value;
-        return (
-          <Pressable key={it.id} accessibilityRole="button" onPress={() => onChange(it.id)} style={{ flexDirection: "row", alignItems: "center", gap: 6, height: 28, paddingHorizontal: 10, borderRadius: RADIUS.chip, maxWidth: "62%", backgroundColor: on ? t.well : "transparent" }}>
-            <StatusDot tone={it.tone} size={6} />
-            <Text numberOfLines={1} style={{ fontSize: 13, fontWeight: "500", color: on ? t.fg : t.muted, flexShrink: 1 }}>{it.label}</Text>
-          </Pressable>
-        );
-      })}
+    <View style={{ gap: 4 }}>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`Canvas ${cur?.title ?? ""}, ${plan.count} canvases`} onPress={() => setOpen((o) => !o)} style={{ flexDirection: "row", alignItems: "center", gap: 8, height: 32, paddingHorizontal: 10, borderRadius: RADIUS.control, backgroundColor: open ? t.well : "transparent", borderWidth: 1, borderColor: t.line }}>
+        <StatusDot tone={cur?.signal ?? "idle"} size={6} />
+        <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, fontWeight: "600", color: t.fg }}>{cur?.title ?? "Pick a canvas"}</Text>
+        <Text style={{ fontSize: 12, color: t.muted, fontVariant: ["tabular-nums"] }}>{plan.count}</Text>
+        <Text style={{ fontSize: 10, color: t.muted }}>{open ? "▴" : "▾"}</Text>
+      </Pressable>
+      {open ? (
+        <ScrollView nestedScrollEnabled style={{ maxHeight: 280, borderRadius: RADIUS.control, borderWidth: 1, borderColor: t.line, backgroundColor: t.raised }} contentContainerStyle={{ paddingVertical: 4 }}>
+          {plan.groups.map((g) => (
+            <View key={g.key}>
+              <Text style={{ fontSize: 11, fontWeight: "600", color: t.faint, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 2, textTransform: "uppercase", letterSpacing: 0.4 }}>{`${g.label} · ${g.items.length}`}</Text>
+              {g.items.map((it) => {
+                const on = it.agentId === cur?.agentId;
+                return (
+                  <Pressable key={it.agentId} accessibilityRole="button" accessibilityState={{ selected: on }} onPress={() => { setOpen(false); onChange(it.agentId); }} style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 30, paddingHorizontal: 10, backgroundColor: on ? t.well : "transparent" }}>
+                    <StatusDot tone={it.signal} size={6} />
+                    <Text numberOfLines={1} style={{ flex: 1, fontSize: 13, fontWeight: on ? "600" : "400", color: on ? t.fg : t.muted }}>{it.title}</Text>
+                    {on ? <Text style={{ fontSize: 12, color: t.muted }}>✓</Text> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          ))}
+        </ScrollView>
+      ) : null}
     </View>
   );
 }
