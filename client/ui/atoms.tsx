@@ -24,7 +24,8 @@ export function StatusDot({ tone, size = 8, halo, pulse }: { tone: Tone; size?: 
   const t = useT();
   const s = t.sig(tone);
   const showHalo = halo ?? s.showHalo;
-  const doPulse = (pulse ?? s.pulse) && !useReducedMotion();
+  const reduced = useReducedMotion(); // always called: a conditional hook threw React #311/#300 when the tone changed
+  const doPulse = (pulse ?? s.pulse) && !reduced;
   const o = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (!doPulse) { o.setValue(1); return; }
